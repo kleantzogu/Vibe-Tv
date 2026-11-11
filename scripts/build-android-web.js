@@ -16,6 +16,7 @@ const root = path.join(__dirname, '..');
 // Only used on a computer: the window shown when the app cannot start.
 const DESKTOP_ONLY = new Set(['recovery.html', 'recovery-preload.js']);
 const APP_SCRIPT = '<script src="app.js"></script>';
+const APP_STYLES = '<link rel="stylesheet" href="styles.css">';
 
 async function build(outDir = path.join(root, 'www')) {
   const esbuild = require('esbuild');
@@ -37,10 +38,19 @@ async function build(outDir = path.join(root, 'www')) {
     logLevel: 'warning',
   });
 
+  fs.copyFileSync(path.join(root, 'platform', 'android', 'android.css'), path.join(outDir, 'android.css'));
+
+  // The page itself: sized to the device, with the Android styles and script added.
   const page = path.join(outDir, 'index.html');
-  const html = fs.readFileSync(page, 'utf8');
-  if (!html.includes(APP_SCRIPT)) throw new Error(`src/index.html no longer loads app.js with ${APP_SCRIPT}`);
-  fs.writeFileSync(page, html.replace(APP_SCRIPT, '<script src="platform-android.js"></script>\n' + APP_SCRIPT));
+  let html = fs.readFileSync(page, 'utf8');
+  for (const [mark, replacement] of [
+    [APP_SCRIPT, '<script src="platform-android.js"></script>\n' + APP_SCRIPT],
+    [APP_STYLES, '<meta name="viewport" content="width=device-width, initial-scale=1">\n  ' + APP_STYLES + '\n  <link rel="stylesheet" href="android.css">'],
+  ]) {
+    if (!html.includes(mark)) throw new Error(`src/index.html no longer has ${mark}`);
+    html = html.replace(mark, replacement);
+  }
+  fs.writeFileSync(page, html);
   return outDir;
 }
 

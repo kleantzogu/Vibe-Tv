@@ -531,6 +531,54 @@ test('platforms: preload.js offers exactly the calls and events of the contract'
   for (const m of app.matchAll(/\bapi\.(\w+)\(/g)) assert.ok(contract.METHODS[m[1]], `app.js calls api.${m[1]}, which is not in the contract`);
 });
 
+test('android: window.api offers the same calls as on a computer, and starts empty', async () => {
+  const { createApi } = require('../platform/android/api.js');
+  const { createBackend } = require('../platform/android/backend.js');
+  const opened = [];
+  const credits = { app: { url: 'https://github.com/o/r', version: '0' }, sections: [{ items: [{ url: 'https://x.example/lib' }] }] };
+  const make = (tv) => createApi({
+    openBackend: () => createBackend({ storage: memoryStorage(), fetchImpl: fetch }),
+    getDevice: async () => ({ tv, version: '9.9.9' }),
+    host: { confirm: async () => true, copyText: async () => {}, credits: async () => structuredClone(credits), openExternal: async (u) => { opened.push(u); } },
+  });
+  const { api, emit } = make(false);
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const onDesktop = [.../exposeInMainWorld\('api', \{([\s\S]*?)\n\}\);/.exec(preload)[1].matchAll(/^ {2}(\w+): /gm)].map((m) => m[1]);
+  assert.deepStrictEqual(Object.keys(api).sort(), onDesktop.sort());
+  assert.deepStrictEqual(Object.keys(api).sort(), Object.keys(contract.METHODS).sort());
+
+  await assert.rejects(api.createPlaylist('Too early'), /not started/);
+  const init = await api.init();
+  assert.deepStrictEqual([init.platform, init.version, init.files, init.accent], ['android', '9.9.9', [], '']);
+  assert.deepStrictEqual(init.state, DEFAULTS);
+  assert.strictEqual((await make(true).api.init()).platform, 'androidtv');
+
+  // What the window is handed is a copy, as it is across Electron's process boundary.
+  init.state.favorites.push('changed in the window');
+  const p = await api.createPlaylist('Mine');
+  p.name = 'changed in the window';
+  assert.strictEqual((await api.renamePlaylist(p.id, '')).name, 'Mine');
+  assert.deepStrictEqual(await api.playlistChannels(p.id), []);
+  assert.deepStrictEqual((await api.setHiddenGroups(p.id, ['News'])).hiddenGroups, ['News']);
+  api.patchState({ activePlaylistId: p.id });
+
+  // Not there yet says so; what Android never needs answers quietly.
+  await assert.rejects(api.importUrl('', 'http://a/b.m3u'), /not available on Android yet/);
+  await assert.rejects(api.startCheck([]), /not available on Android yet/);
+  assert.deepStrictEqual([(await api.updateState()).status, (await api.mediaCaps({})).convert, await api.popupMenu([]), await api.convertInspect('x')], ['off', false, null, []]);
+  assert.strictEqual(await api.confirm({ message: 'Sure?' }), true);
+  assert.strictEqual((await api.credits()).app.version, '9.9.9');
+  await api.openCreditLink('https://x.example/lib');
+  await assert.rejects(api.openCreditLink('https://evil.example/'), /not in the acknowledgements/);
+  assert.deepStrictEqual(opened, ['https://x.example/lib']);
+
+  const got = [];
+  api.on('check:progress', (batch) => got.push(batch));
+  emit('check:progress', [{ url: 'http://a/1', ok: true }]);
+  assert.deepStrictEqual(got, [[{ url: 'http://a/1', ok: true }]]);
+  assert.throws(() => api.on('nope', () => {}), /Unknown event/);
+});
+
 test('android: the web app builds, with nothing from Node in it', async () => {
   const { build } = require('../scripts/build-android-web.js');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-www-'));
@@ -541,7 +589,8 @@ test('android: the web app builds, with nothing from Node in it', async () => {
     const bundle = fs.readFileSync(path.join(out, 'platform-android.js'), 'utf8');
     assert.ok(!/\brequire\(["'](fs|path|crypto|child_process|electron)["']\)/.test(bundle));
     assert.ok(!/\beval\(|new Function\(/.test(bundle), 'the page forbids eval');
-    for (const f of ['app.js', 'm3u.js', 'styles.css', 'credits.json', 'vendor/hls.min.js']) assert.ok(fs.existsSync(path.join(out, f)), f);
+    assert.ok(html.includes('name="viewport"') && html.indexOf('android.css') > html.indexOf('styles.css'), 'Android styles come after the shared ones');
+    for (const f of ['app.js', 'm3u.js', 'styles.css', 'android.css', 'credits.json', 'vendor/hls.min.js']) assert.ok(fs.existsSync(path.join(out, f)), f);
     assert.ok(!fs.existsSync(path.join(out, 'recovery.html')));
   } finally {
     fs.rmSync(out, { recursive: true, force: true });
