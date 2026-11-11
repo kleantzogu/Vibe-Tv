@@ -45,4 +45,27 @@ for s in (16, 32, 128, 256, 512):
 subprocess.run(['iconutil', '-c', 'icns', iconset, '-o', f'{root}/build/icon.icns'], check=True)
 # .ico for Windows
 other.save(f'{root}/build/icon.ico', sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+
+
+# GitHub social preview (1280×640): upload it in the repository's Settings ▸ General ▸ Social preview.
+from PIL import ImageDraw, ImageFont
+def _font(size, bold=False):
+    for f in ('/System/Library/Fonts/SFNS.ttf', '/System/Library/Fonts/Helvetica.ttc', 'C:/Windows/Fonts/segoeui.ttf', '/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf'):
+        try:
+            ft = ImageFont.truetype(f, size)
+            if bold:
+                try: ft.set_variation_by_name('Bold')
+                except Exception: pass
+            return ft
+        except Exception:
+            pass
+    return ImageFont.load_default()
+card = Image.new('RGBA', (1280, 640), (22, 22, 24, 255))
+card.alpha_composite(mac.resize((420, 420), Image.LANCZOS), (70, 110))
+d = ImageDraw.Draw(card)
+d.text((540, 190), 'Vibe TV', font=_font(112, True), fill=(245, 245, 247))
+d.text((545, 335), 'Free, open-source player for', font=_font(38), fill=(170, 170, 178))
+d.text((545, 385), 'M3U / IPTV playlists', font=_font(38), fill=(170, 170, 178))
+d.text((545, 470), 'macOS · Windows · Linux', font=_font(28), fill=(120, 120, 128))
+card.convert('RGB').save(f'{root}/build/social-preview.png')
 print('ok')
