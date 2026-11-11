@@ -1,9 +1,9 @@
-# Runs the checks on every push to main and every pull request, on all three systems.
+# Runs the checks on every push to main or android and every pull request, on all three systems.
 name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [main, android]
   pull_request:
 
 permissions:
