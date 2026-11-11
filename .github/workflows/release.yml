@@ -22,6 +22,11 @@ on:
         description: Add the installers to that GitHub release
         type: boolean
         default: false
+      only:
+        description: Build for
+        type: choice
+        options: [windows and linux, windows, linux]
+        default: windows and linux
 
 permissions:
   contents: write
@@ -32,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-latest]
+        os: ${{ fromJSON(inputs.only == 'windows' && '["windows-latest"]' || inputs.only == 'linux' && '["ubuntu-latest"]' || '["windows-latest", "ubuntu-latest"]') }}
     runs-on: ${{ matrix.os }}
     env:
       TAG: ${{ inputs.tag || github.ref_name }}
