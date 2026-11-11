@@ -10,6 +10,7 @@ const { probe, sniff, checkAll } = require('../lib/probe.js');
 const { Library } = require('../lib/library.js');
 const xtream = require('../lib/xtream.js');
 const codecs = require('../lib/codecs.js');
+const { Updates, notesText, friendlyError } = require('../lib/updates.js');
 const { inputArgs, cleanError, parseStreams } = require('../lib/convert.js');
 const os = require('os');
 const fs = require('fs');
@@ -385,6 +386,16 @@ test('convert: ffmpeg input options per kind of address', () => {
   assert.deepStrictEqual(listed.map((x) => `${x.kind}:${x.codec}`), ['video:h264', 'audio:ac3']);
   assert.strictEqual(inputArgs('http://h/x').slice(-2).join(' '), '-i http://h/x');
   assert.strictEqual(cleanError('[http @ 0x1] HTTP error 403 Forbidden'), 'The server refused the stream (403)');
+});
+
+test('updates: release notes, errors, and running from source', async () => {
+  assert.strictEqual(notesText('<h2>New</h2><ul><li>Quick search</li><li>Faster &amp; smoother</li></ul>'), 'New\n• Quick search\n• Faster & smoother');
+  assert.strictEqual(notesText([{ note: '<p>One</p>' }, { note: '<p>Two</p>' }]), 'One\n\nTwo');
+  assert.strictEqual(friendlyError(new Error('net::ERR_INTERNET_DISCONNECTED')), 'No internet connection');
+  assert.strictEqual(friendlyError(new Error('HttpError: 404 Not Found')), 'No release has been published yet');
+  // From source there is nothing to update: no checks, no electron-updater loaded.
+  const u = new Updates({ enabled: false, auto: true, currentVersion: '1.0.0' });
+  assert.deepStrictEqual([u.state.status, (await u.check(true)).status], ['off', 'off']);
 });
 
 (async () => {

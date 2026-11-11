@@ -93,7 +93,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round
 .sidebar {
   position: relative;
   flex: none;
-  width: var(--sb-w);
+  /* The width the person dragged to, but never so wide that the video gets less than 400 px. */
+  width: clamp(260px, var(--sb-w), calc(100vw - 400px));
+  container-type: inline-size;
   display: flex;
   flex-direction: column;
   min-height: 0;
@@ -102,6 +104,23 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round
 }
 
 /* Auto-hide and hide: the sidebar is tucked away to the left and slides in over the video. */
+/* Resize handle on the sidebar's right edge */
+.sb-resize { position: absolute; top: 0; bottom: 0; right: -4px; z-index: 6; width: 8px; cursor: col-resize; -webkit-app-region: no-drag; outline: none; }
+.sb-resize::after { content: ""; position: absolute; top: 0; bottom: 0; left: 3px; width: 2px; background: transparent; transition: background 0.15s 0.08s; }
+.sb-resize:hover::after, .sb-resize:focus-visible::after, .app.resizing .sb-resize::after { background: var(--accent); }
+.app.resizing, .app.resizing * { cursor: col-resize !important; user-select: none !important; }
+.app.resizing .sidebar { transition: none !important; }
+.app.resizing video { pointer-events: none; }
+.sidebar.will-collapse { opacity: 0.5; transition: opacity 0.12s; }
+.sidebar.will-collapse + .sb-resize, .app.resizing.collapsing { cursor: w-resize !important; }
+
+/* Narrow sidebar: the library pills keep only their icons, so the row never overflows. */
+@container (max-width: 330px) {
+  .chip.has-icon span { display: none; }
+  .chip.has-icon { padding: 0 9px; }
+  .chip.has-icon svg { margin: 0; }
+}
+
 .app.sb-auto .sidebar, .app.sb-hide .sidebar {
   position: absolute;
   top: 0;
@@ -405,6 +424,7 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round
 }
 .player video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: contain; background: #000; }
 .player.hide-cursor { cursor: none; }
+.player.moving-window, .player.moving-window video { cursor: grabbing; }
 
 .overlay { position: absolute; inset: 0; display: grid; place-items: center; pointer-events: none; }
 .overlay-box { display: grid; justify-items: center; gap: 12px; max-width: 420px; padding: 24px; text-align: center; color: rgba(255, 255, 255, 0.72); }
@@ -558,3 +578,97 @@ svg { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round
   text-align: center;
 }
 .gm-row.flash { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--accent) 60%, transparent); }
+
+/* ───────────── Quick search (Spotlight style) ───────────── */
+.spot {
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: clamp(48px, 14vh, 150px) 16px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+.spot[open] { display: flex; justify-content: center; align-items: flex-start; }
+.spot::backdrop { background: rgba(0, 0, 0, 0.26); backdrop-filter: blur(5px); }
+.spot-box {
+  width: min(680px, 100%);
+  max-height: calc(100vh - clamp(48px, 14vh, 150px) - 32px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--window) 84%, transparent);
+  backdrop-filter: blur(36px) saturate(1.7);
+  box-shadow: 0 28px 90px rgba(0, 0, 0, 0.38), 0 0 0 0.5px rgba(0, 0, 0, 0.18);
+  animation: spot-in 0.16s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes spot-in { from { opacity: 0; transform: translateY(-8px) scale(0.985); } }
+@media (prefers-reduced-motion: reduce) { .spot-box { animation: none; } }
+.spot-field { display: flex; align-items: center; gap: 12px; flex: none; height: 64px; padding: 0 20px; cursor: text; }
+.spot-field svg { width: 22px; height: 22px; flex: none; color: var(--text-2); stroke-width: 1.6; }
+.spot-field input { flex: 1; min-width: 0; border: 0; outline: 0; background: none; font-size: 22px; letter-spacing: -0.01em; user-select: text; }
+.spot-field input::placeholder { color: var(--text-3); }
+.spot-list { flex: 0 1 auto; min-height: 0; overflow-y: auto; padding: 4px 8px 8px; border-top: 1px solid var(--line); }
+.spot-sec { display: flex; justify-content: space-between; gap: 8px; padding: 10px 10px 4px; font-size: 11.5px; font-weight: 600; color: var(--text-2); }
+.spot-sec span:last-child { font-weight: 400; font-variant-numeric: tabular-nums; }
+.spot-row { display: flex; align-items: center; gap: 12px; height: 52px; padding: 0 10px; border-radius: 9px; }
+.spot-row.sel { background: var(--accent); color: var(--on-accent); }
+.spot-row .logo { width: 36px; height: 36px; border-radius: 8px; font-size: 12px; }
+.spot-row .logo img { padding: 4px; }
+.spot-main { flex: 1; min-width: 0; }
+.spot-name { font-size: 14px; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spot-name mark { background: none; color: inherit; font-weight: 700; }
+.spot-sub { margin-top: 1px; font-size: 12px; color: var(--text-2); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.spot-row.sel .spot-sub { color: inherit; opacity: 0.82; }
+.spot-side { display: flex; align-items: center; gap: 7px; flex: none; }
+.spot-tag { padding: 2px 6px; border-radius: 4px; font-size: 10.5px; font-weight: 600; background: var(--hover); color: var(--text-2); white-space: nowrap; }
+.spot-row.sel .spot-tag { background: rgba(255, 255, 255, 0.2); color: inherit; }
+.spot-row.sel .badge { color: inherit; box-shadow: inset 0 0 0 1px currentColor; }
+.spot-fav { width: 13px; height: 13px; color: #e3a008; fill: currentColor; }
+.spot-row.sel .spot-fav { color: inherit; }
+.spot-ic { display: grid; place-items: center; flex: none; width: 36px; height: 36px; border-radius: 8px; background: var(--hover); color: var(--text-2); }
+.spot-ic svg { width: 18px; height: 18px; }
+.spot-row.sel .spot-ic { background: rgba(255, 255, 255, 0.2); color: inherit; }
+.spot-go { font-size: 11.5px; opacity: 0; }
+.spot-row.sel .spot-go { opacity: 0.85; }
+.spot-empty { padding: 28px 16px; text-align: center; color: var(--text-2); line-height: 1.5; }
+.spot-empty strong { display: block; color: var(--text); font-weight: 600; }
+.spot-foot { display: flex; align-items: center; gap: 16px; flex: none; padding: 8px 16px; border-top: 1px solid var(--line); font-size: 11.5px; color: var(--text-2); }
+.spot-scope { margin-left: auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+kbd { display: inline-block; min-width: 18px; padding: 2px 4px; border: 1px solid var(--field-line); border-radius: 4px; background: var(--hover); font: 600 10.5px/1.2 var(--font); text-align: center; color: var(--text-2); }
+kbd + kbd { margin-left: 2px; }
+
+/* ───────────── Update card ───────────── */
+.update-card {
+  position: fixed;
+  left: 14px;
+  bottom: 14px;
+  z-index: 35;
+  width: min(320px, calc(100vw - 28px));
+  padding: 12px 12px 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--window) 88%, transparent);
+  backdrop-filter: blur(30px) saturate(1.6);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, 0.28);
+  animation: uc-in 0.22s cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+@keyframes uc-in { from { opacity: 0; transform: translateY(10px); } }
+@media (prefers-reduced-motion: reduce) { .update-card { animation: none; } }
+.uc-head { display: flex; align-items: flex-start; gap: 11px; }
+.uc-head img { width: 36px; height: 36px; flex: none; border-radius: 8px; }
+.uc-text { flex: 1; min-width: 0; }
+.uc-text strong { display: block; font-size: 13.5px; font-weight: 600; }
+.uc-text span { display: block; margin-top: 2px; font-size: 12px; line-height: 1.45; color: var(--text-2); }
+.uc-close { width: 22px; height: 22px; margin: -4px -4px 0 0; color: var(--text-2); }
+.uc-close svg { width: 12px; height: 12px; }
+.uc-bar { height: 4px; margin: 10px 0 2px 47px; border-radius: 2px; background: var(--press); overflow: hidden; }
+.uc-bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width 0.3s linear; }
+.uc-actions { display: flex; align-items: center; gap: 8px; margin: 10px 0 0 47px; }
+.uc-actions .btn { height: 28px; padding: 0 12px; font-size: 12.5px; }
+.uc-actions .text-btn { margin-left: auto; font-size: 12.5px; }

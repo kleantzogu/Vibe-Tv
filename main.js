@@ -1,6 +1,6 @@
 'use strict';
 
-const { app, BrowserWindow, ipcMain, dialog, Menu, clipboard, nativeTheme, systemPreferences, session, net } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, nativeTheme, systemPreferences, session, net } = require('electron');
 const fs = require('fs');
 const path = require('path');
 
@@ -11,6 +11,7 @@ const { probe, checkAll } = require('./lib/probe');
 const { readFileRetry, explainReadError } = require('./lib/readfile');
 const { Library } = require('./lib/library');
 const { Converter } = require('./lib/convert');
+const { Updates } = require('./lib/updates');
 const xtream = require('./lib/xtream');
 const codecs = require('./lib/codecs');
 
@@ -33,6 +34,8 @@ let store = null;
 let channelDb = null;
 let library = null;
 let converter = null;
+let updates = null;
+const RELEASES = 'https://github.com/kleantzogu/Vibe-Tv/releases';
 // Codecs the window decodes itself in an MPEG-TS stream, reported by the window when it starts.
 let canPlayTs = { video: ['h264'], audio: ['aac', 'mp3'] };
 let activeHeaders = null; // { referrer, userAgent } for the channel that is playing
@@ -65,7 +68,7 @@ const DEFAULTS = {
   favorites: [],
   recents: [],
   status: {}, // stream url -> { s: 'ok' | 'dead', t: timestamp }
-  settings: { hideOffline: false, volume: 1, muted: false, sidebar: 'show' }, // sidebar: show | auto | hide
+  settings: { hideOffline: false, volume: 1, muted: false, sidebar: 'show', autoUpdate: true }, // sidebar: show | auto | hide
   window: { width: 1280, height: 800 },
 };
 
@@ -346,10 +349,62 @@ const SIDEBAR_MODES = [
   ['hide', 'Hide Sidebar'],
 ];
 
+// Update items, in the app menu on macOS and the Help menu elsewhere.
+function updateMenuItems() {
+  return [
+    { id: 'check-updates', label: 'Check for Updates…', click: () => checkForUpdatesByHand() },
+    {
+      id: 'auto-update',
+      label: 'Install Updates Automatically',
+      type: 'checkbox',
+      checked: store.data.settings.autoUpdate !== false,
+      click: (item) => setAutoUpdate(item.checked),
+    },
+  ];
+}
+
+function checkForUpdatesByHand() {
+  if (!updates || !updates.enabled) {
+    dialog.showMessageBox(win, {
+      type: 'info',
+      message: 'Updates work in the installed app',
+      detail: `This copy is running from source (version ${app.getVersion()}). Pull the latest code instead, or install Vibe TV from ${RELEASES}.`,
+    });
+    return;
+  }
+  updates.check(true);
+}
+
+function setAutoUpdate(on) {
+  store.data.settings.autoUpdate = !!on;
+  store.save();
+  if (updates) updates.setAuto(on);
+  const item = Menu.getApplicationMenu() && Menu.getApplicationMenu().getMenuItemById('auto-update');
+  if (item) item.checked = !!on;
+  send('update:state', updates ? updates.state : null);
+}
+
 function buildMenu() {
   const cmd = (id) => () => send('menu', id);
   const template = [
-    ...(isMac ? [{ role: 'appMenu' }] : []),
+    ...(isMac
+      ? [{
+          label: app.name,
+          submenu: [
+            { role: 'about' },
+            { type: 'separator' },
+            ...updateMenuItems(),
+            { type: 'separator' },
+            { role: 'services' },
+            { type: 'separator' },
+            { role: 'hide' },
+            { role: 'hideOthers' },
+            { role: 'unhide' },
+            { type: 'separator' },
+            { role: 'quit' },
+          ],
+        }]
+      : []),
     {
       label: 'File',
       submenu: [
@@ -379,6 +434,7 @@ function buildMenu() {
           click: cmd('sidebar-' + mode),
         })),
         { type: 'separator' },
+        { label: 'Quick Search…', accelerator: 'CmdOrCtrl+K', click: cmd('quick-search') },
         { label: 'Find Channel', accelerator: 'CmdOrCtrl+F', click: cmd('find') },
         { type: 'separator' },
         { label: 'Check Which Channels Are Online', accelerator: 'CmdOrCtrl+Shift+K', click: cmd('check') },
@@ -408,6 +464,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
+    ...(isMac ? [] : [{ label: 'Help', submenu: [...updateMenuItems(), { type: 'separator' }, { role: 'about' }] }]),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -455,6 +512,17 @@ function registerIpc() {
       if (mode) mode.checked = true;
     }
     store.save();
+  });
+
+  handle('update:get', () => ({ ...(updates ? updates.state : { status: 'off' }), auto: store.data.settings.autoUpdate !== false }));
+  handle('update:check', () => (updates ? updates.check(true) : null));
+  handle('update:download', () => (updates ? updates.download() : null));
+  handle('update:install', () => updates && updates.install());
+  handle('update:auto', (on) => setAutoUpdate(on));
+  // "What's new": the release page of that version, in the browser.
+  handle('update:notes', (version) => {
+    const v = /^\d+\.\d+\.\d+(-[\w.]+)?$/.test(String(version || '')) ? `/tag/v${version}` : '';
+    return shell.openExternal(RELEASES + v);
   });
 
   handle('playlist:create', (name) => library.create(name));
@@ -515,6 +583,13 @@ function registerIpc() {
   handle('convert:close', (id) => converter.close(id));
 
   // Focus mode on macOS: the red/yellow/green buttons fade with the player controls.
+  // Dragging the picture moves the window (sent many times a second, so no reply).
+  ipcMain.on('window:move', (_e, pos) => {
+    if (!win || win.isDestroyed() || win.isFullScreen() || (!isMac && win.isMaximized())) return;
+    if (!pos || !Number.isFinite(pos.x) || !Number.isFinite(pos.y)) return;
+    win.setPosition(Math.round(pos.x), Math.round(pos.y));
+  });
+
   handle('window:buttons', (visible) => {
     if (isMac && win && !win.isDestroyed()) win.setWindowButtonVisibility(!!visible);
   });
@@ -647,6 +722,15 @@ if (!app.requestSingleInstanceLock()) {
     installStreamHooks();
     buildMenu();
     createWindow();
+
+    updates = new Updates({
+      enabled: app.isPackaged || !!envVar('UPDATE_URL'),
+      auto: store.data.settings.autoUpdate !== false,
+      feedUrl: envVar('UPDATE_URL') || undefined, // a test feed; normally GitHub Releases
+      currentVersion: app.getVersion(),
+    });
+    updates.on('state', (s) => send('update:state', { ...s, auto: store.data.settings.autoUpdate !== false }));
+    updates.start();
 
     try {
       systemPreferences.on('accent-color-changed', () => send('theme:accent', accentColor()));

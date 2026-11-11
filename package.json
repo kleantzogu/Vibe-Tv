@@ -1,7 +1,7 @@
 {
   "name": "vibe-tv",
   "productName": "Vibe TV",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "Vibe TV: a clean desktop player for M3U / IPTV playlists",
   "main": "main.js",
   "author": "Vibe TV",
@@ -10,7 +10,8 @@
   "scripts": {
     "start": "node scripts/start.js",
     "test": "node test/run.js",
-    "dist": "electron-builder"
+    "dist": "electron-builder",
+    "release": "node scripts/release.js"
   },
   "devDependencies": {
     "electron": "44.10.0",
@@ -39,7 +40,8 @@
     "mac": {
       "category": "public.app-category.video",
       "target": [
-        "dmg"
+        "dmg",
+        "zip"
       ],
       "icon": "build/icon.icns"
     },
@@ -58,9 +60,18 @@
     },
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
+    ],
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "kleantzogu",
+        "repo": "Vibe-Tv",
+        "releaseType": "release"
+      }
     ]
   },
   "dependencies": {
+    "electron-updater": "6.8.11",
     "ffmpeg-static": "5.3.0"
   }
 }

@@ -15,7 +15,8 @@
 - **Plays (almost) everything.** HLS, DASH, MPEG-TS, FLV, MP4, MKV, WebM and more. What the built-in
   engine can't decode (MPEG-2, AC-3, E-AC-3, MP2, DTS, interlaced broadcasts, `rtmp://`, `rtsp://`,
   `udp://`…) is converted on the fly with the bundled ffmpeg, and only the part that needs it.
-- **Handles huge playlists.** Tens of thousands of channels with instant search, accent-insensitive.
+- **Handles huge playlists.** Tens of thousands of channels with instant search, accent-insensitive,
+  and a Spotlight-style quick search on `/` to jump to any channel.
 - **Groups under control.** Filter by group, or hide whole countries or single groups you never watch.
 - **Focus mode.** Hide the sidebar, or let it slide in only when the pointer touches the left edge.
 - **Favorites and recently watched**, shared across playlists.
@@ -75,6 +76,27 @@ three, run the command once on each system. On a Mac with a Developer ID certifi
 Keychain the app is signed automatically, but it is not notarized, and the Windows installer is not
 signed, so macOS Gatekeeper and Windows SmartScreen show a warning the first time they are opened.
 
+### Publish a release (and update everyone)
+
+Installed copies check GitHub Releases when they start and every six hours. To ship a new version:
+
+1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`), commit and push.
+2. Run `npm run release`. It checks that the tests pass and that everything is pushed, builds the
+   installer for this computer, and publishes it as release `v1.2.0` on GitHub together with the files
+   the updater reads (`latest-mac.yml`, and the `.zip` macOS updates from). It uses your `gh` login (or
+   `GH_TOKEN`). Run it on each system you release for; each adds its files to the same release.
+3. Edit the release on GitHub to add notes; the app shows them under "What's new".
+
+People then get the update as chosen in the app menu (Help menu on Windows and Linux) with
+**Install Updates Automatically**: on (the default), it downloads quietly and installs when they quit,
+with a card offering **Restart now**; off, a card says a new version is out and downloads it only when
+they click **Download**. **Check for Updates…** checks right away. On macOS an update is only installed
+when it is signed with the same Developer ID as the installed app.
+
+The repository's releases must be public for installed copies to read them. To test updates without
+publishing, serve a folder containing a build's `latest-mac.yml` and `.zip` over http and start the app
+with `VIBE_TV_UPDATE_URL=http://127.0.0.1:8000/`.
+
 To notarize the macOS app, add your Apple ID credentials (or an App Store Connect API key) as
 described in the [electron-builder documentation](https://www.electron.build/code-signing-mac).
 
@@ -111,6 +133,20 @@ of the window and slides away when the pointer leaves; or *Hide*, where it stays
 it back with the button at the top left of the video. On macOS the window buttons fade with the player
 controls while the sidebar is away.
 
+**Moving the window.** There is no title bar: drag the picture (or the top edge of the window) to move
+it. A click on the picture still pauses and plays, and a double-click goes full screen.
+
+**Sidebar width.** Drag the sidebar's right edge to make it wider or narrower (it always leaves at least
+400 px for the video); the width is remembered. Double-click the edge to reset it. Drag it well past the
+narrowest width to tuck the sidebar away. With the edge focused (Tab), ← → resize it and Home / End go to
+the narrowest and widest.
+
+**Quick search.** Press `/` (or Ctrl/⌘+K, View ▸ Quick Search) anywhere, even in full screen or with
+the sidebar hidden: a big search field opens in the middle of the window, Spotlight style. Before you
+type it lists recently watched channels and favorites; as you type it shows the best matching channels
+(names that start with what you typed first, then favorites and recent ones) and matching groups.
+↑ ↓ move, ↵ plays the channel or opens the group, Esc or a click outside closes it.
+
 **Search.** Type in the search field; it shows how many channels it searches. It matches channel names, groups and ids, ignores accents,
 and every word has to match ("fox news" finds "Fox News Radio").
 
@@ -137,11 +173,14 @@ to play is marked offline as well, and one that plays is marked online.
 | Ctrl/⌘ + L | Import from URL |
 | Ctrl/⌘ + Shift + L | Log in with Xtream Codes |
 | Ctrl/⌘ + R | Refresh an Xtream playlist from its server |
-| Ctrl/⌘ + F or / | Search (brings back a hidden sidebar) |
+| / or Ctrl/⌘ + K | Quick search, in the middle of the window |
+| Ctrl/⌘ + F | Search in the sidebar (brings back a hidden sidebar) |
 | ⌃⌘S (macOS), Ctrl+B | Show / hide the sidebar |
 | ↑ ↓, Enter | Move through the list, play |
 | Space | Play / pause |
 | Ctrl/⌘ + ↑ ↓ | Previous / next channel (plain ↑ ↓ in full screen) |
+| Click on the picture | Play / pause |
+| Drag the picture | Move the window |
 | F, F11 (Ctrl+⌘+F on macOS), double-click | Full screen |
 | M | Mute |
 | Ctrl/⌘ + D | Favorite |
@@ -216,10 +255,12 @@ lib/
   codecs.js        Codec detection from the stream's first bytes, and what to convert
   convert.js       ffmpeg conversion served to the player over a local address
   channeldb.js     Logos and categories from the iptv-org database
+  updates.js       Updates from GitHub Releases
   store.js, net.js, readfile.js, epg.js   Settings, downloads, patient file reading, XMLTV parser
 src/               The window: index.html, styles.css, app.js, m3u.js (playlist parser)
 src/vendor/        hls.js 1.7.3, mpegts.js 1.8.2, dash.js 5.2.1, with their licenses
 scripts/start.js   `npm start`
+scripts/release.js `npm run release`
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)
 ```

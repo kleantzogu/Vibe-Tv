@@ -95,6 +95,8 @@
   let saveTimer = 0;
   const pendingPatch = {};
   function persist(patch) {
+    // Settings saved in quick succession are merged, not replaced (sidebar mode, then its width).
+    if (patch.settings && pendingPatch.settings) patch = { ...patch, settings: { ...pendingPatch.settings, ...patch.settings } };
     Object.assign(pendingPatch, patch);
     clearTimeout(saveTimer);
     saveTimer = setTimeout(() => {
@@ -212,8 +214,12 @@
     const b = h('button', 'chip' + (selected ? ' on' : ''));
     b.setAttribute('role', 'tab');
     b.setAttribute('aria-selected', selected ? 'true' : 'false');
-    if (icon) b.appendChild(svg(icon));
+    if (icon) {
+      b.classList.add('has-icon');
+      b.appendChild(svg(icon));
+    }
     b.appendChild(h('span', '', label));
+    b.setAttribute('aria-label', label);
     b.title = label;
     b.addEventListener('click', onClick);
     return b;
@@ -463,6 +469,372 @@
   }
   $('gmSearch').addEventListener('input', renderGroupManager);
   $('btnManageGroups').addEventListener('click', () => openGroupManager());
+
+  /* ───────────────────────────── quick search (Spotlight style) ───────────────────────────── */
+
+  // "/" or Cmd/Ctrl+K: a big search field in the middle of the window, over everything (full screen
+  // and a hidden sidebar included). Empty, it offers recently watched channels and favorites; typing
+  // finds channels of the open playlist (hidden groups left out) and its groups.
+  const SPOT_MAX = 40;
+  const spot = { items: [], sel: -1 };
+  const escapeRe = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+  function openSpot() {
+    const dlg = $('dlgSpot');
+    if (dlg.open) return $('spotInput').select();
+    if (document.querySelector('dialog[open]')) return;
+    if (!state.channels.length && !state.recents.length && !state.favorites.length) return;
+    closeGroupPop();
+    $('spotInput').value = '';
+    renderSpot();
+    dlg.showModal();
+    $('spotInput').focus();
+  }
+  function closeSpot() {
+    if ($('dlgSpot').open) $('dlgSpot').close();
+  }
+
+  // Best matches first: the name starts with the search, then a word in it does, then it contains it.
+  function rankChannels(terms) {
+    const whole = terms.join(' ');
+    const wordStart = new RegExp('(^|[^a-z0-9])' + escapeRe(terms[0]));
+    const recent = new Set(state.recents.map((r) => r.url));
+    const hits = [];
+    for (const c of shownChannels()) {
+      if (c._s === undefined) indexChannel(c);
+      if (!terms.every((t) => c._s.includes(t))) continue;
+      const n = c._n || (c._n = fold(c.name));
+      let score = 0;
+      if (n.startsWith(whole)) score += 100;
+      else if (wordStart.test(n)) score += 50;
+      if (n.includes(whole)) score += 30;
+      if (terms.every((t) => n.includes(t))) score += 20; // in the name, not just the group
+      if (favUrls.has(c.url)) score += 15;
+      if (recent.has(c.url)) score += 10;
+      if (isDead(c)) score -= 25;
+      hits.push([score - n.length / 200, c]);
+    }
+    hits.sort((a, b) => b[0] - a[0]);
+    return { list: hits.slice(0, SPOT_MAX).map((x) => x[1]), total: hits.length };
+  }
+
+  // The channel name with the searched words in bold (when the name has no accents to fold away).
+  function markedName(name, terms) {
+    const el = h('div', 'spot-name');
+    const folded = fold(name);
+    if (!terms.length || folded.length !== name.length) { el.textContent = name; return el; }
+    const marks = [];
+    for (const t of terms) {
+      const i = folded.indexOf(t);
+      if (i >= 0) marks.push([i, i + t.length]);
+    }
+    marks.sort((a, b) => a[0] - b[0]);
+    let at = 0;
+    for (const [a, b] of marks) {
+      if (a < at) continue;
+      el.append(name.slice(at, a), h('mark', '', name.slice(a, b)));
+      at = b;
+    }
+    el.append(name.slice(at));
+    return el;
+  }
+
+  function spotRow(item, terms) {
+    const i = spot.items.length;
+    spot.items.push(item);
+    const r = h('div', 'spot-row');
+    r.id = 'spot-' + i;
+    r.setAttribute('role', 'option');
+    if (item.type === 'channel') {
+      const c = item.c;
+      const logo = h('div', 'logo');
+      setLogo(logo, c);
+      const main = h('div', 'spot-main');
+      const st = state.status[c.url];
+      const groups = groupsOf(c).join(', ');
+      main.append(markedName(c.name, terms), h('div', 'spot-sub', st && st.s === 'dead' ? `Offline when last checked${groups ? ' · ' + groups : ''}` : groups || ' '));
+      const side = h('div', 'spot-side');
+      if (state.current && state.current.url === c.url) side.appendChild(h('span', 'spot-tag', 'Playing'));
+      if (c.quality) side.appendChild(h('span', 'badge', c.quality));
+      if (favUrls.has(c.url)) { const s = svg(ICON.star); s.classList.add('spot-fav'); side.appendChild(s); }
+      if (st) side.appendChild(h('span', 'dot ' + st.s));
+      r.append(logo, main, side);
+      r.setAttribute('aria-label', c.name);
+    } else {
+      const ic = h('div', 'spot-ic');
+      ic.appendChild(svg('<path d="M2.5 5.5v6a1.5 1.5 0 0 0 1.5 1.5h8a1.5 1.5 0 0 0 1.5-1.5V6.5A1.5 1.5 0 0 0 12 5H8L6.5 3.5H4A1.5 1.5 0 0 0 2.5 5z"/>'));
+      const main = h('div', 'spot-main');
+      main.append(markedName(item.g.label, terms), h('div', 'spot-sub', plural(item.g.n, 'channel', 'channels')));
+      r.append(ic, main, h('span', 'spot-go', 'Show group'));
+      r.setAttribute('aria-label', `Group ${item.g.label}`);
+    }
+    r.addEventListener('mousemove', () => { if (spot.sel !== i) selectSpot(i, false); });
+    r.addEventListener('click', () => activateSpot(i));
+    return r;
+  }
+
+  function renderSpot() {
+    const list = $('spotList');
+    list.textContent = '';
+    spot.items = [];
+    const q = $('spotInput').value.trim();
+    const terms = fold(q).split(/\s+/).filter(Boolean);
+    const section = (title, note) => {
+      const s = h('div', 'spot-sec');
+      s.append(h('span', '', title), h('span', '', note || ''));
+      list.appendChild(s);
+    };
+    const empty = (title, body) => {
+      const e = h('div', 'spot-empty');
+      e.append(h('strong', '', title), body || '');
+      list.appendChild(e);
+    };
+    const p = activePlaylist();
+    $('spotScope').textContent = p ? `In ${p.name}` : '';
+
+    if (!terms.length) {
+      const recent = state.recents.slice(0, 6);
+      const favs = state.favorites.filter((f) => !recent.some((r) => r.url === f.url)).slice(0, 6);
+      if (recent.length) { section('Recently watched'); recent.forEach((c) => list.appendChild(spotRow({ type: 'channel', c }, terms))); }
+      if (favs.length) { section('Favorites'); favs.forEach((c) => list.appendChild(spotRow({ type: 'channel', c }, terms))); }
+      if (!recent.length && !favs.length) empty(`Search ${plural(shownChannels().length, 'channel', 'channels')}`, 'Type a channel or group name.');
+    } else {
+      const { list: hits, total } = rankChannels(terms);
+      const groups = groupCounts().filter((g) => terms.every((t) => fold(g.label).includes(t))).slice(0, 5);
+      if (hits.length) {
+        section('Channels', total > hits.length ? `Best ${hits.length} of ${total.toLocaleString()}` : '');
+        hits.forEach((c) => list.appendChild(spotRow({ type: 'channel', c }, terms)));
+      }
+      if (groups.length) {
+        section('Groups');
+        groups.forEach((g) => list.appendChild(spotRow({ type: 'group', g }, terms)));
+      }
+      if (!hits.length && !groups.length) {
+        const hidden = state.hidden.size ? state.channels.filter((c) => !isShown(c) && (c._s !== undefined || (indexChannel(c), true)) && terms.every((t) => c._s.includes(t))).length : 0;
+        empty(`Nothing matches “${q}”`, hidden ? `${plural(hidden, 'channel in a hidden group matches', 'channels in hidden groups match')}. Show them in Manage Groups.` : 'Check the spelling, or try fewer words.');
+      }
+    }
+    selectSpot(spot.items.length ? 0 : -1, true);
+  }
+
+  function selectSpot(i, scroll) {
+    const list = $('spotList');
+    const old = list.querySelector('.spot-row.sel');
+    if (old) { old.classList.remove('sel'); old.setAttribute('aria-selected', 'false'); }
+    spot.sel = i;
+    const input = $('spotInput');
+    const item = spot.items[i];
+    if (i < 0 || !item) { input.removeAttribute('aria-activedescendant'); return; }
+    const r = $('spot-' + i);
+    r.classList.add('sel');
+    r.setAttribute('aria-selected', 'true');
+    input.setAttribute('aria-activedescendant', r.id);
+    $('spotEnterHint').textContent = item.type === 'group' ? 'show group' : 'play';
+    if (scroll) r.scrollIntoView({ block: 'nearest' });
+  }
+
+  function activateSpot(i) {
+    const item = spot.items[i];
+    if (!item) return;
+    closeSpot();
+    if (item.type === 'group') {
+      setView({ type: 'group', group: item.g.key });
+      peek(true);
+      return;
+    }
+    const at = state.filtered.findIndex((c) => c.url === item.c.url);
+    if (at >= 0) { state.cursor = at; scrollToIndex(at); }
+    play(item.c);
+  }
+
+  let spotTimer = 0;
+  $('spotInput').addEventListener('input', () => {
+    clearTimeout(spotTimer);
+    spotTimer = setTimeout(renderSpot, 12); // coalesces fast typing; ranking 12,000 channels takes ~10 ms
+  });
+  $('spotInput').addEventListener('keydown', (e) => {
+    const n = spot.items.length;
+    if (e.key === 'ArrowDown' || (e.key === 'Tab' && !e.shiftKey) || (e.ctrlKey && e.key === 'n')) {
+      e.preventDefault();
+      if (n) selectSpot((spot.sel + 1) % n, true);
+    } else if (e.key === 'ArrowUp' || (e.key === 'Tab' && e.shiftKey) || (e.ctrlKey && e.key === 'p')) {
+      e.preventDefault();
+      if (n) selectSpot((spot.sel - 1 + n) % n, true);
+    } else if (e.key === 'PageDown' || e.key === 'PageUp') {
+      e.preventDefault();
+      if (n) selectSpot(Math.max(0, Math.min(n - 1, spot.sel + (e.key === 'PageDown' ? 6 : -6))), true);
+    } else if (e.key === 'Enter') {
+      e.preventDefault();
+      activateSpot(spot.sel);
+    }
+  });
+  // A click on the dimmed area around the box closes it.
+  $('dlgSpot').addEventListener('click', (e) => { if (e.target === $('dlgSpot')) closeSpot(); });
+
+  /* ───────────────────────────── updates ───────────────────────────── */
+
+  // New versions come from GitHub Releases (see lib/updates.js). A card in the bottom-left corner says
+  // when one is out (in "ask" mode), how the download goes, and when it's ready to install.
+  let dismissedUpdate = ''; // "version:status" the person closed or put off
+  function renderUpdate(s) {
+    const card = $('updateCard');
+    if (!s) return;
+    if (s.manual && s.status === 'none') toast(`You’re up to date: Vibe TV ${s.current} is the newest version.`);
+    if (s.manual && s.status === 'error') toast(`Couldn’t check for updates: ${s.error}.`, 7000);
+
+    const key = `${s.version}:${s.status}`;
+    const show =
+      dismissedUpdate !== key &&
+      (s.status === 'available' || s.status === 'ready' || (s.status === 'downloading' && (!s.auto || s.manual || card.dataset.status === 'downloading')));
+    if (!show) {
+      card.hidden = true;
+      card.dataset.status = '';
+      return;
+    }
+    const later = () => { dismissedUpdate = key; card.hidden = true; card.dataset.status = ''; };
+    let title = '';
+    let body = '';
+    const actions = [];
+    if (s.status === 'available') {
+      title = `Vibe TV ${s.version} is available`;
+      body = `You have ${s.current}. Download it now, or later from the app menu.`;
+      actions.push(['Download', 'primary', () => api.downloadUpdate()], ['Later', '', later]);
+    } else if (s.status === 'downloading') {
+      title = `Downloading Vibe TV ${s.version}`;
+      body = `${s.progress || 0}% · you can keep watching.`;
+    } else {
+      title = `Vibe TV ${s.version} is ready`;
+      body = 'Restart to finish updating. It also installs by itself the next time you quit.';
+      actions.push(['Restart now', 'primary', () => api.installUpdate()], ['Later', '', later]);
+    }
+    // Same card already on screen: only update what changed, so the progress bar moves smoothly.
+    if (card.dataset.status === s.status && card.dataset.version === s.version) {
+      card.querySelector('.uc-text span').textContent = body;
+      const bar = card.querySelector('.uc-bar i');
+      if (bar) bar.style.width = (s.progress || 0) + '%';
+      card.hidden = false;
+      return;
+    }
+    card.dataset.status = s.status;
+    card.dataset.version = s.version;
+    card.textContent = '';
+    const head = h('div', 'uc-head');
+    const icon = document.createElement('img');
+    icon.src = 'icon.png';
+    icon.alt = '';
+    const text = h('div', 'uc-text');
+    text.append(h('strong', '', title), h('span', '', body));
+    const close = h('button', 'icon-btn uc-close');
+    close.setAttribute('aria-label', 'Close');
+    close.appendChild(svg('<path d="M4 4l8 8M12 4l-8 8"/>'));
+    close.addEventListener('click', later);
+    head.append(icon, text, close);
+    card.appendChild(head);
+    if (s.status === 'downloading') {
+      const bar = h('div', 'uc-bar');
+      const fill = h('i');
+      fill.style.width = (s.progress || 0) + '%';
+      bar.appendChild(fill);
+      card.appendChild(bar);
+    }
+    if (actions.length || s.version) {
+      const row = h('div', 'uc-actions');
+      for (const [label, kind, run] of actions) {
+        const b = h('button', 'btn' + (kind ? ' ' + kind : ''), label);
+        b.addEventListener('click', run);
+        row.appendChild(b);
+      }
+      const notes = h('button', 'text-btn', 'What’s new');
+      notes.addEventListener('click', () => api.openReleaseNotes(s.version).catch(() => {}));
+      row.appendChild(notes);
+      card.appendChild(row);
+    }
+    card.hidden = false;
+  }
+  api.on('update:state', renderUpdate);
+
+  /* ───────────────────────────── sidebar width ───────────────────────────── */
+
+  // Drag the sidebar's right edge. Dragging well past the narrowest width tucks the sidebar away
+  // (Hide mode) and keeps the width for when it comes back; double-click resets it.
+  const SB_MIN = 260;
+  const SB_DEFAULT = 360;
+  const SB_COLLAPSE = 70; // px past the minimum that count as "put it away"
+  const sbMax = () => Math.max(SB_MIN, Math.min(640, window.innerWidth - 400));
+  const clampWidth = (w) => Math.round(Math.max(SB_MIN, Math.min(sbMax(), w)));
+  const sidebarWidth = () => sidebarEl.getBoundingClientRect().width;
+
+  function setSidebarWidth(w, save) {
+    if (w == null) {
+      appEl.style.removeProperty('--sb-w');
+    } else {
+      appEl.style.setProperty('--sb-w', clampWidth(w) + 'px');
+    }
+    const handle = $('sbResize');
+    handle.setAttribute('aria-valuemin', SB_MIN);
+    handle.setAttribute('aria-valuemax', sbMax());
+    handle.setAttribute('aria-valuenow', Math.round(sidebarWidth()));
+    if (save) {
+      state.settings.sidebarWidth = w == null ? null : clampWidth(w);
+      persist({ settings: { sidebarWidth: state.settings.sidebarWidth } });
+    }
+  }
+
+  (() => {
+    const handle = $('sbResize');
+    let startX = 0;
+    let startW = 0;
+    let collapsing = false;
+    handle.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0) return;
+      e.preventDefault();
+      handle.setPointerCapture(e.pointerId);
+      startX = e.clientX;
+      startW = sidebarWidth();
+      collapsing = false;
+      appEl.classList.add('resizing');
+    });
+    handle.addEventListener('pointermove', (e) => {
+      if (!appEl.classList.contains('resizing')) return;
+      const want = startW + (e.clientX - startX);
+      // Only a docked sidebar collapses; an overlay one just stops at the minimum.
+      collapsing = sidebarMode() === 'show' && want < SB_MIN - SB_COLLAPSE;
+      sidebarEl.classList.toggle('will-collapse', collapsing);
+      setSidebarWidth(want, false);
+    });
+    const end = () => {
+      if (!appEl.classList.contains('resizing')) return;
+      appEl.classList.remove('resizing');
+      sidebarEl.classList.remove('will-collapse');
+      if (collapsing) {
+        setSidebarWidth(startW, false); // keep the width it had for when it comes back
+        setSidebarMode('hide');
+        toast(`Sidebar hidden. Bring it back with ${SIDEBAR_KEY} or the button at the top left.`);
+      } else {
+        setSidebarWidth(sidebarWidth(), true);
+      }
+      collapsing = false;
+      queueRows();
+    };
+    handle.addEventListener('pointerup', end);
+    handle.addEventListener('pointercancel', end);
+    handle.addEventListener('lostpointercapture', end);
+    handle.addEventListener('dblclick', () => { setSidebarWidth(null, true); queueRows(); });
+    handle.addEventListener('keydown', (e) => {
+      const step = e.shiftKey ? 60 : 20;
+      let w = null;
+      if (e.key === 'ArrowLeft') w = sidebarWidth() - step;
+      else if (e.key === 'ArrowRight') w = sidebarWidth() + step;
+      else if (e.key === 'Home') w = SB_MIN;
+      else if (e.key === 'End') w = sbMax();
+      else if (e.key === 'Enter') { setSidebarWidth(null, true); return; }
+      else return;
+      e.preventDefault();
+      setSidebarWidth(w, true);
+    });
+    // Keep the numbers the handle reports right when the window changes size.
+    window.addEventListener('resize', () => setSidebarWidth(state.settings.sidebarWidth || null, false));
+  })();
 
   /* ───────────────────────────── sidebar: show, auto-hide, hide ───────────────────────────── */
 
@@ -1690,8 +2062,44 @@
     toast('Stream address copied');
   });
   $('btnFav').addEventListener('click', () => toggleFavorite(state.current));
-  video.addEventListener('click', togglePlay);
-  video.addEventListener('dblclick', toggleFullscreen);
+  // On the picture, a click pauses or plays, a double-click goes full screen, and pressing and moving
+  // the pointer drags the whole window. Whether it was a click is decided when the button is released:
+  // if the pointer travelled, it was a drag and playback is left alone.
+  (() => {
+    const THRESHOLD = 5; // px the pointer has to travel before it is a drag rather than a click
+    let drag = null;
+    const stopMoving = () => {
+      playerEl.classList.remove('moving-window');
+      drag = null;
+    };
+    video.addEventListener('pointerdown', (e) => {
+      if (e.button !== 0 || !e.isPrimary) return;
+      drag = { id: e.pointerId, sx: e.screenX, sy: e.screenY, wx: window.screenX, wy: window.screenY, moving: false };
+      if (!document.fullscreenElement) {
+        try { video.setPointerCapture(e.pointerId); } catch (err) { /* not capturable: moves still arrive while over the video */ }
+      }
+    });
+    video.addEventListener('pointermove', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      if (!(e.buttons & 1)) return stopMoving(); // released somewhere we didn't hear about
+      const dx = e.screenX - drag.sx;
+      const dy = e.screenY - drag.sy;
+      if (!drag.moving) {
+        if (Math.hypot(dx, dy) < THRESHOLD || document.fullscreenElement) return;
+        drag.moving = true;
+        playerEl.classList.add('moving-window');
+      }
+      api.moveWindow(drag.wx + dx, drag.wy + dy);
+    });
+    video.addEventListener('pointerup', (e) => {
+      if (!drag || e.pointerId !== drag.id) return;
+      const wasClick = !drag.moving;
+      stopMoving();
+      if (wasClick) togglePlay();
+    });
+    video.addEventListener('pointercancel', stopMoving);
+    video.addEventListener('dblclick', toggleFullscreen);
+  })();
   $('btnPrev').title = `Previous channel (${MOD}↑)`;
   $('btnNext').title = `Next channel (${MOD}↓)`;
 
@@ -1767,7 +2175,7 @@
       togglePlay();
     } else if (key === 'f') toggleFullscreen();
     else if (key === 'm') toggleMute();
-    else if (key === '/') { e.preventDefault(); peek(true); $('search').focus(); }
+    else if (key === '/') { e.preventDefault(); openSpot(); }
     else if (document.fullscreenElement && (key === 'arrowup' || key === 'arrowdown')) {
       e.preventDefault();
       step(key === 'arrowdown' ? 1 : -1);
@@ -1783,6 +2191,7 @@
     'rename-playlist': () => renamePlaylist(activePlaylist()),
     'manage-groups': () => state.channels.length && openGroupManager(),
     find: () => { peek(true); $('search').focus(); $('search').select(); },
+    'quick-search': openSpot,
     'sidebar-toggle': toggleSidebar,
     'sidebar-show': () => setSidebarMode('show'),
     'sidebar-auto': () => setSidebarMode('auto'),
@@ -1849,6 +2258,8 @@
     applyVolume();
     document.documentElement.classList.add('platform-' + init.platform);
     applySidebar();
+    setSidebarWidth(state.settings.sidebarWidth || null, false);
+    api.updateState().then(renderUpdate).catch(() => {});
     showShell();
     renderHeader();
     renderFilters();

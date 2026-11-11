@@ -11,7 +11,7 @@ async function call(channel, ...args) {
   return res.value;
 }
 
-const EVENTS = new Set(['menu', 'check:progress', 'files:opened', 'import:waiting', 'theme:accent']);
+const EVENTS = new Set(['menu', 'check:progress', 'files:opened', 'import:waiting', 'theme:accent', 'update:state']);
 
 contextBridge.exposeInMainWorld('api', {
   init: () => call('app:init'),
@@ -47,6 +47,14 @@ contextBridge.exposeInMainWorld('api', {
 
   popupMenu: (items) => call('menu:popup', items),
   setWindowButtons: (visible) => call('window:buttons', visible),
+  moveWindow: (x, y) => ipcRenderer.send('window:move', { x, y }),
+
+  updateState: () => call('update:get'),
+  checkForUpdates: () => call('update:check'),
+  downloadUpdate: () => call('update:download'),
+  installUpdate: () => call('update:install'),
+  setAutoUpdate: (on) => call('update:auto', on),
+  openReleaseNotes: (version) => call('update:notes', version),
   confirm: (opts) => call('dialog:confirm', opts),
   copyText: (text) => call('clipboard:write', text),
 

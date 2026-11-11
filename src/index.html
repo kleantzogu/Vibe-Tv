@@ -57,6 +57,9 @@
       <div id="listEmpty" class="list-empty" hidden></div>
     </div>
 
+    <div id="sbResize" class="sb-resize" role="separator" aria-orientation="vertical" aria-label="Sidebar width" tabindex="0"
+      title="Drag to make the sidebar wider or narrower. Double-click to reset."></div>
+
     <div id="groupPop" class="group-pop" role="dialog" aria-label="Groups" hidden>
       <label class="search search-sm">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
@@ -233,6 +236,24 @@
   <p class="gm-foot">Hidden groups stay out of All, search, the group list and channel checks. Favorites and Recent still show their channels. Changes apply right away.</p>
 </dialog>
 
+<!-- Quick search: "/" or Cmd/Ctrl+K, Spotlight style -->
+<dialog id="dlgSpot" class="spot" aria-label="Quick search">
+  <div class="spot-box">
+    <label class="spot-field">
+      <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+      <input id="spotInput" type="text" placeholder="Search channels and groups" autocomplete="off" spellcheck="false"
+        role="combobox" aria-expanded="true" aria-controls="spotList" aria-autocomplete="list">
+    </label>
+    <div id="spotList" class="spot-list" role="listbox" aria-label="Results"></div>
+    <div class="spot-foot" aria-hidden="true">
+      <span><kbd>↑</kbd><kbd>↓</kbd> move</span>
+      <span><kbd>↵</kbd> <span id="spotEnterHint">play</span></span>
+      <span><kbd>esc</kbd> close</span>
+      <span id="spotScope" class="spot-scope"></span>
+    </div>
+  </div>
+</dialog>
+
 <dialog id="dlgName" class="dialog">
   <form method="dialog" id="formName">
     <h2 id="nameTitle">New playlist</h2>
@@ -248,6 +269,7 @@
 </dialog>
 
 <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+<div id="updateCard" class="update-card" role="status" aria-live="polite" hidden></div>
 
 <script src="vendor/hls.min.js"></script>
 <script src="m3u.js"></script>
