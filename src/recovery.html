@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self'">
+<meta name="color-scheme" content="light dark">
+<title>Vibe TV</title>
+<!-- The recovery window (see boot.js). Everything it needs is in this file, so it works even when the
+     rest of the app doesn't. -->
+<style>
+  :root { --bg: #ffffff; --text: #1b1b1f; --text-2: #6a6a73; --line: rgba(0,0,0,.1); --btn: #f1f1f4; --btn-line: rgba(0,0,0,.14); --accent: #2a6fdb; --bar: rgba(0,0,0,.08); }
+  @media (prefers-color-scheme: dark) { :root { --bg: #1d1d1f; --text: #f1f1f4; --text-2: #a2a2ac; --line: rgba(255,255,255,.1); --btn: #2c2c30; --btn-line: rgba(255,255,255,.14); --bar: rgba(255,255,255,.12); } }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { display: flex; flex-direction: column; padding: 34px 30px 22px; background: var(--bg); color: var(--text); font: 13px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; -webkit-user-select: none; user-select: none; -webkit-app-region: drag; }
+  button, details, pre { -webkit-app-region: no-drag; }
+  header { display: flex; gap: 14px; align-items: center; }
+  img { width: 52px; height: 52px; flex: none; }
+  h1 { margin: 0; font-size: 17px; }
+  #reason { margin: 2px 0 0; color: var(--text-2); }
+  .status { margin-top: 22px; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+  #state { margin: 0; font-weight: 600; }
+  #hint { margin: 4px 0 0; color: var(--text-2); }
+  .bar { height: 5px; margin-top: 10px; border-radius: 3px; background: var(--bar); overflow: hidden; }
+  .bar i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .3s linear; }
+  .spin { display: inline-block; width: 12px; height: 12px; margin-right: 6px; vertical-align: -1px; border: 2px solid var(--bar); border-top-color: var(--accent); border-radius: 50%; animation: s .8s linear infinite; }
+  @keyframes s { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation-duration: 2.4s; } }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+  button { height: 30px; padding: 0 13px; border: 1px solid var(--btn-line); border-radius: 7px; background: var(--btn); color: var(--text); font: inherit; }
+  button.primary { background: var(--accent); border-color: transparent; color: #fff; font-weight: 500; }
+  details { margin-top: auto; padding-top: 14px; color: var(--text-2); font-size: 12px; }
+  summary { cursor: default; }
+  pre { max-height: 110px; overflow: auto; margin: 8px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--btn); color: var(--text); font: 11px/1.45 ui-monospace, Menlo, Consolas, monospace; white-space: pre-wrap; overflow-wrap: anywhere; -webkit-user-select: text; user-select: text; }
+  .linkish { height: auto; padding: 0; border: 0; background: none; color: var(--accent); }
+</style>
+</head>
+<body>
+  <header>
+    <img src="icon.png" alt="">
+    <div>
+      <h1 id="title">Vibe TV couldn’t start</h1>
+      <p id="reason">Something went wrong while it was opening.</p>
+    </div>
+  </header>
+
+  <div class="status">
+    <p id="state"><span class="spin"></span>Looking for a fix…</p>
+    <p id="hint">A newer version may already fix this. If there is one, it’s downloaded and installed by itself.</p>
+    <div class="bar" id="bar" hidden><i id="fill"></i></div>
+    <div class="actions" id="actions"></div>
+  </div>
+
+  <details>
+    <summary>Details</summary>
+    <pre id="details"></pre>
+    <p><button class="linkish" id="copy">Copy details</button></p>
+  </details>
+
+<script>
+  const $ = (id) => document.getElementById(id);
+  let countdown = 0;
+  let timer = 0;
+
+  function button(label, run, primary) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (primary) b.className = 'primary';
+    b.addEventListener('click', run);
+    return b;
+  }
+
+  function render(s) {
+    if (s.reason) $('reason').textContent = s.reason;
+    if (s.details !== undefined) $('details').textContent = s.details || 'No details.';
+    const state = $('state');
+    const hint = $('hint');
+    const actions = $('actions');
+    actions.textContent = '';
+    $('bar').hidden = s.stage !== 'downloading';
+    clearInterval(timer);
+
+    const fallback = () => {
+      actions.append(
+        button('Try again', () => window.recovery.retry()),
+        button('Report the problem', () => window.recovery.report()),
+        button('Download from GitHub', () => window.recovery.releases())
+      );
+    };
+
+    if (s.stage === 'checking') {
+      state.innerHTML = '<span class="spin"></span>Looking for a fix…';
+      hint.textContent = 'A newer version may already fix this. If there is one, it’s downloaded and installed by itself.';
+    } else if (s.stage === 'downloading') {
+      state.innerHTML = '<span class="spin"></span>';
+      state.append(`Downloading Vibe TV ${s.version}… ${s.progress || 0}%`);
+      hint.textContent = 'Vibe TV restarts with it when the download is done.';
+      $('fill').style.width = (s.progress || 0) + '%';
+    } else if (s.stage === 'ready') {
+      countdown = countdown || 5;
+      const tick = () => {
+        state.textContent = `Vibe TV ${s.version} is ready. Restarting in ${countdown} s…`;
+        if (countdown-- <= 0) { clearInterval(timer); window.recovery.install(); }
+      };
+      hint.textContent = 'The fix is downloaded and installs as Vibe TV restarts.';
+      actions.append(button('Restart now', () => window.recovery.install(), true));
+      tick();
+      timer = setInterval(tick, 1000);
+    } else if (s.stage === 'none') {
+      state.textContent = 'No fix has been published yet.';
+      hint.textContent = `You have Vibe TV ${s.current}, the newest version. Vibe TV keeps looking while this window is open; you can also tell us about the problem.`;
+      fallback();
+    } else {
+      state.textContent = 'Couldn’t look for a fix.';
+      hint.textContent = (s.error || 'Something went wrong.') + ' You can try again, or download Vibe TV from GitHub.';
+      actions.append(button('Look again', () => window.recovery.check(), true));
+      fallback();
+    }
+  }
+
+  $('copy').addEventListener('click', () => { window.recovery.copy(); $('copy').textContent = 'Copied'; });
+  window.recovery.onStatus(render);
+  window.recovery.get().then(render);
+</script>
+</body>
+</html>

@@ -1,7 +1,7 @@
 {
   "name": "vibe-tv",
   "productName": "Vibe TV",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "description": "Vibe TV: a clean desktop player for M3U / IPTV playlists",
   "keywords": [
     "iptv",
@@ -15,7 +15,7 @@
     "electron",
     "desktop-app"
   ],
-  "main": "main.js",
+  "main": "boot.js",
   "author": "The Vibe TV contributors",
   "homepage": "https://github.com/kleantzogu/Vibe-Tv#readme",
   "repository": {
@@ -42,6 +42,7 @@
     "appId": "com.vibetv.app",
     "productName": "Vibe TV",
     "files": [
+      "boot.js",
       "main.js",
       "preload.js",
       "lib/**/*",

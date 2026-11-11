@@ -1,6 +1,12 @@
 'use strict';
 
 const { app, BrowserWindow, ipcMain, dialog, Menu, shell, clipboard, nativeTheme, systemPreferences, session, net } = require('electron');
+
+// boot.js loads this file and keeps a way to recover if it fails. Tell it when the window is up, and
+// report launch checks (VIBE_TV_SMOKE_TEST=1: start, make sure the page came up, quit) through it.
+const boot = global.vibeBoot || { healthy() {}, smoke(ok, m) { console.log(ok ? 'VIBE_TV_SMOKE_OK ' + m : 'VIBE_TV_SMOKE_FAIL ' + m); app.exit(ok ? 0 : 1); } };
+const SMOKE = process.env.VIBE_TV_SMOKE_TEST === '1';
+const smokeFail = (why) => boot.smoke(false, why);
 const fs = require('fs');
 const path = require('path');
 
@@ -35,8 +41,24 @@ let channelDb = null;
 let library = null;
 let converter = null;
 let updates = null;
-// Where releases live: the GitHub repository in package.json's publish settings (a fork publishes to its own).
-const { owner: GH_OWNER, repo: GH_REPO } = require('./package.json').build.publish[0];
+// Where releases live: the GitHub repository in the publish settings, so a fork points at its own.
+// Installed builds don't have package.json's "build" section (electron-builder leaves it out), but
+// they carry app-update.yml with the same owner and repo.
+function releaseRepo() {
+  const pkg = require('./package.json');
+  const fromBuild = pkg.build && Array.isArray(pkg.build.publish) && pkg.build.publish[0];
+  if (fromBuild && fromBuild.owner && fromBuild.repo) return fromBuild;
+  try {
+    const yml = fs.readFileSync(path.join(process.resourcesPath, 'app-update.yml'), 'utf8');
+    const owner = (/^owner:\s*(\S+)/m.exec(yml) || [])[1];
+    const repo = (/^repo:\s*(\S+)/m.exec(yml) || [])[1];
+    if (owner && repo) return { owner, repo };
+  } catch (e) { /* running from source, or no update settings */ }
+  const m = /github\.com\/([^/]+)\/([^/.#]+)/.exec(String((pkg.repository && pkg.repository.url) || pkg.repository || ''));
+  if (m) return { owner: m[1], repo: m[2] };
+  return { owner: 'kleantzogu', repo: 'Vibe-Tv' };
+}
+const { owner: GH_OWNER, repo: GH_REPO } = releaseRepo();
 const RELEASES = `https://github.com/${GH_OWNER}/${GH_REPO}/releases`;
 // Codecs the window decodes itself in an MPEG-TS stream, reported by the window when it starts.
 let canPlayTs = { video: ['h264'], audio: ['aac', 'mp3'] };
@@ -342,6 +364,21 @@ function createWindow() {
   win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   win.webContents.on('will-navigate', (e) => e.preventDefault());
 
+  if (SMOKE) {
+    win.webContents.on('render-process-gone', (_e, d) => smokeFail('the window crashed: ' + (d && d.reason)));
+    win.webContents.on('console-message', (e, level, message) => {
+      const text = String(message === undefined ? e.message : message);
+      if (/^Uncaught/.test(text)) smokeFail('error in the window: ' + text);
+    });
+    win.webContents.once('did-finish-load', () => setTimeout(async () => {
+      const up = await win.webContents
+        .executeJavaScript("!!window.api && (!document.getElementById('app').hidden || !document.getElementById('welcome').hidden)")
+        .catch((e) => smokeFail(e.message));
+      if (!up) smokeFail('the window loaded but the app did not start');
+      boot.smoke(true, `${app.getVersion()} ${process.platform}`);
+    }, 2500));
+    setTimeout(() => smokeFail('the window did not load within 45 seconds'), 45000);
+  }
   win.loadFile(path.join(__dirname, 'src', 'index.html'));
 }
 
@@ -493,6 +530,7 @@ function handle(channel, fn) {
 function registerIpc() {
   handle('app:init', () => {
     rendererReady = true;
+    boot.healthy(); // the window's page is running: this version starts fine
     const files = pendingOpen;
     pendingOpen = [];
     return {

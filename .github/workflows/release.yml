@@ -1,6 +1,7 @@
-# Builds the Windows and Linux installers for a release and adds them to it, together with the files
-# installed copies read to update themselves (latest.yml, latest-linux.yml). The macOS installer is
-# built and signed on a Mac with `npm run release`, which pushes the version tag that starts this.
+# Builds the Windows and Linux installers for a release, checks that each starts (and can recover
+# from a broken start), and only then adds them to the release, together with the files installed
+# copies read to update themselves (latest.yml, latest-linux.yml). The macOS installer is built,
+# checked and signed on a Mac with `npm run release`, which pushes the version tag that starts this.
 #
 # Run it by hand (Actions ▸ Release ▸ Run workflow) to build an existing tag; leave "publish" off to
 # only build and download the installers from the run's artifacts.
@@ -54,6 +55,18 @@ jobs:
       - run: npm ci
       - run: npm test
 
+      - name: Build
+        run: npx electron-builder --publish never
+
+      # The packaged app must start, and must recover from a simulated broken start, before anyone
+      # gets it (scripts/launch-check.js). Linux has no screen here, so it runs in a virtual one.
+      - name: Launch check (Windows)
+        if: runner.os == 'Windows'
+        run: node scripts/launch-check.js "dist/win-unpacked/Vibe TV.exe"
+      - name: Launch check (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a node scripts/launch-check.js dist/linux-unpacked/vibe-tv
+
       - name: Make sure the release exists
         if: env.PUBLISH == 'true'
         shell: bash
@@ -62,9 +75,14 @@ jobs:
             gh release create "$TAG" --verify-tag --title "Vibe TV ${TAG#v}" --notes "Vibe TV ${TAG#v}" ||
             gh release view "$TAG" >/dev/null
 
-      - name: Build${{ (github.event_name == 'push' || inputs.publish) && ' and publish' || '' }}
+      - name: Publish
+        if: env.PUBLISH == 'true'
         shell: bash
-        run: npx electron-builder --publish "$([ "$PUBLISH" = true ] && echo always || echo never)"
+        run: |
+          shopt -s nullglob
+          files=(dist/*.exe dist/*.exe.blockmap dist/*.AppImage dist/latest.yml dist/latest-linux.yml)
+          [ ${#files[@]} -gt 0 ] || { echo "Nothing to publish"; exit 1; }
+          gh release upload "$TAG" --clobber "${files[@]}"
 
       - name: Keep the installers with this run
         uses: actions/upload-artifact@v4

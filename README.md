@@ -97,11 +97,14 @@ signed, so macOS Gatekeeper and Windows SmartScreen show a warning the first tim
 Installed copies check GitHub Releases when they start and every six hours. To ship a new version:
 
 1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`), commit and push.
-2. On a Mac, run `npm run release`. It checks that the tests pass and that everything is pushed, tags
-   the commit `v1.2.0`, and publishes the signed macOS installer with the files the updater reads
-   (`latest-mac.yml`, and the `.zip` macOS updates from). It uses your `gh` login (or `GH_TOKEN`).
+2. On a Mac, run `npm run release`. It checks that the tests pass and that everything is pushed,
+   builds the signed macOS app, and runs the **launch check**: the packaged app must start, and must
+   recover from a simulated broken start. Only then does it tag the commit `v1.2.0` and publish the
+   installer with the files the updater reads (`latest-mac.yml`, and the `.zip` macOS updates from).
+   It uses your `gh` login (or `GH_TOKEN`).
 3. The tag starts the **Release** workflow on GitHub Actions, which builds the Windows and Linux
-   installers (and their `latest.yml` / `latest-linux.yml`) and adds them to the same release.
+   installers, runs the same launch check on each, and only then adds them (with `latest.yml` /
+   `latest-linux.yml`) to the same release.
 4. Edit the release on GitHub to add notes; the app shows them under "What's new".
 
 People then get the update as chosen in the app menu (Help menu on Windows and Linux) with
@@ -247,6 +250,15 @@ and settings from the old `M3U Player` folder; that folder is left as it was and
 
 ## Troubleshooting
 
+### If Vibe TV can't start
+
+If a version can't open (because of a bug in it, say), Vibe TV shows a small recovery window instead
+of failing silently. It looks for a newer version on GitHub straight away, whatever the update
+setting, downloads it and restarts into it. If no fix is out yet, it offers **Try again**, **Report the
+problem** (a pre-filled GitHub issue, with your home folder and stream addresses left out) and
+**Download from GitHub**, and it keeps looking while it's open. A version that failed to open twice in
+a row goes straight to the recovery window.
+
 ### "The file did not arrive in time"
 
 The playlist file is listed in a folder but its contents are not on your computer: it is in
@@ -265,6 +277,7 @@ start it with `npx electron . --no-sandbox`.
 ## Project layout
 
 ```
+boot.js            Starts the app, and opens the recovery window if it can't start
 main.js            Main process: window, menus, dialogs, playlists, request headers for streams
 preload.js         The small API the window is allowed to call
 lib/
@@ -280,6 +293,7 @@ src/               The window: index.html, styles.css, app.js, m3u.js (playlist 
 src/vendor/        hls.js 1.7.3, mpegts.js 1.8.2, dash.js 5.2.1, with their licenses
 scripts/start.js   `npm start`
 scripts/release.js `npm run release`
+scripts/launch-check.js  Starts a packaged build normally and with a simulated broken start
 scripts/credits.js `npm run credits`: writes src/credits.json, the Acknowledgements list
 .github/           CI and Release workflows, issue and pull request templates
 test/run.js        `npm test`

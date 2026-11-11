@@ -42,6 +42,12 @@ between them, and `lib/` holds the parts that can be tested without a window.
 
 Every push and pull request runs the tests on macOS, Windows and Linux.
 
+`boot.js` is what starts first: it loads the app and, if the app can't start, opens a recovery window
+that fetches a fixed version. Keep it small and free of dependencies on the rest of the app, so a
+mistake anywhere else can't break the way out. To see the recovery window, run
+`VIBE_TV_SIMULATE_CRASH=startup npm start`. Releases run `scripts/launch-check.js` on the packaged app
+(a normal start and a simulated broken one) and stop if either fails.
+
 ## Releasing (maintainers)
 
 Raise `"version"` in `package.json`, commit and push, then run `npm run release` on a Mac. It tags the

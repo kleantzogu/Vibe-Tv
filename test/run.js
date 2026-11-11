@@ -11,6 +11,7 @@ const { Library } = require('../lib/library.js');
 const xtream = require('../lib/xtream.js');
 const codecs = require('../lib/codecs.js');
 const { Updates, notesText, friendlyError } = require('../lib/updates.js');
+const startup = require('../lib/startup.js');
 const { inputArgs, cleanError, parseStreams } = require('../lib/convert.js');
 const os = require('os');
 const fs = require('fs');
@@ -406,6 +407,26 @@ test('credits: the acknowledgements list matches what ships', () => {
   const names = c.sections.flatMap((s) => s.items.map((i) => i.name));
   for (const n of ['hls.js', 'mpegts.js', 'dash.js', 'FFmpeg', 'Electron', 'electron-updater']) assert.ok(names.includes(n), n);
   for (const s of c.sections) for (const i of s.items) assert.ok(i.license && i.url && i.purpose, i.name);
+});
+
+test('startup: recovery after failed starts, and private details kept out', () => {
+  // First start of a version: try it. Each start counts as failed until the app reports in.
+  assert.deepStrictEqual(startup.decide({}, '1.3.0', false), { recover: false, failures: 1, lastError: '' });
+  assert.strictEqual(startup.decide({ version: '1.3.0', failures: 1 }, '1.3.0', false).recover, false);
+  // Two failed starts in a row: go straight to recovery, unless the person says "Try again".
+  assert.deepStrictEqual(startup.decide({ version: '1.3.0', failures: 2, lastError: 'boom' }, '1.3.0', false), { recover: true, failures: 2, lastError: 'boom' });
+  assert.strictEqual(startup.decide({ version: '1.3.0', failures: 2 }, '1.3.0', true).recover, false);
+  // A new version (the fix) starts with a clean slate.
+  assert.deepStrictEqual(startup.decide({ version: '1.3.0', failures: 5, lastError: 'x' }, '1.3.1', false), { recover: false, failures: 1, lastError: '' });
+
+  const raw = 'TypeError at /Users/kleant/Library/x.js and C:\\Users\\Kleant\\a.js while playing http://srv:8080/user/pass/123 (rtmp://a/b)';
+  const safe = startup.sanitize(raw, '/Users/kleant');
+  assert.ok(!/kleant/i.test(safe) && !/user\/pass/.test(safe), safe);
+  assert.ok(safe.includes('<address>') && safe.includes('~/Library/x.js'), safe);
+
+  const url = startup.issueUrl({ owner: 'o', repo: 'r' }, { version: '1.3.0', platform: 'win32', arch: 'x64', error: 'boom' });
+  assert.ok(url.startsWith('https://github.com/o/r/issues/new?labels=bug&title=Vibe%20TV%201.3.0'));
+  assert.ok(decodeURIComponent(url).includes('boom'));
 });
 
 (async () => {
