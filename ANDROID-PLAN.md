@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–2 done (milestone M1) · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–3 done · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -9,6 +9,10 @@ Status: in progress · Written: 2026-11-11 · Phases 0–2 done (milestone M1) �
 > - `capacitor.config.json` instead of `.ts` (no TypeScript needed).
 > - Capacitor's HTTP plugin is **not** switched on globally: that would route every `fetch` and XHR of the page through it and buffer whole responses, which breaks hls.js streaming. The adapter calls it directly where it needs native HTTP.
 > - Import and state logic moved from `main.js` to `lib/imports.js` and `lib/state.js` in Phase 1, so Android shares it.
+> - Storage and HTTP are two small plugins of our own (`VibeFiles`, `VibeHttp`) instead of Capacitor's Filesystem and HTTP plugins: files are replaced in one step, and a channel check can stop reading a live stream after its first bytes.
+> - Channel checks (`probe`, `startCheck`) were done in Phase 3; the plan had not given them a phase.
+> - File import is phone-only: TVs have no file picker. "Open with Vibe TV" for `.m3u` files moves to Phase 6.
+> - Android cloud backup of the app's data is off, because its files hold Xtream Codes logins.
 > - Android-only styles live in `platform/android/android.css`, added to `www/` by the build, so `src/styles.css` stays the desktop's.
 
 ## 1. Goal
@@ -243,10 +247,11 @@ Estimates are working days for one developer who knows the codebase. Each phase 
 
 ### Phase 3: Data layer, imports, library (2–3 days)  ·  branch: `android-p3-data-imports`
 
-- [ ] Filesystem storage backend; settings, favorites, recents, hidden groups persist across restarts.
-- [ ] Playlists: create, rename, delete, remove channels.
-- [ ] Imports: M3U file, M3U URL, Xtream login and refresh, using native HTTP.
-- [ ] Channel logos and categories from the iptv-org database with weekly cache refresh.
+- [x] Filesystem storage backend; settings, favorites, recents, hidden groups persist across restarts.
+- [x] Playlists: create, rename, delete, remove channels.
+- [x] Imports: M3U file, M3U URL, Xtream login and refresh, using native HTTP.
+- [x] Channel logos and categories from the iptv-org database with weekly cache refresh.
+- [x] Channel checks: one channel (`probe`) and the whole playlist (`startCheck`), with each channel's Referer / User-Agent.
 - **Done when:** a 20k-channel playlist imports, search stays instant, and everything is still there after the app is killed and reopened.
 
 ### Phase 4: Playback v1 with web engines (1–2 days)  ·  branch: `android-p4-web-playback`

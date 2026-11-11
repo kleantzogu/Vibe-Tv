@@ -13,15 +13,16 @@ const { createImports } = require('../../lib/imports');
 /**
  * @param {object} deps
  * @param {object} deps.storage      storage backend (see lib/storage-node.js for what one offers)
- * @param {function} deps.fetchImpl  fetch() for playlists, Xtream servers and the channel database
+ * @param {function} deps.fetchImpl  fetch() for playlists and Xtream servers
+ * @param {function} [deps.dbFetchImpl]  fetch() for the channel database, when that is another one
  * @param {string} [deps.dataDir]    folder inside the storage that holds everything
  */
-async function createBackend({ storage, fetchImpl, dataDir = '' }) {
+async function createBackend({ storage, fetchImpl, dbFetchImpl = fetchImpl, dataDir = '' }) {
   const store = await Store.open(storage.join(dataDir, 'settings.json'), DEFAULTS, storage);
   pruneStatus(store.data);
   const library = new Library(store, storage.join(dataDir, 'playlists'), null, storage);
   const imports = createImports({ library, fetchImpl });
-  const channelDb = new ChannelDb({ fetchImpl, cacheDir: storage.join(dataDir, 'cache'), storage });
+  const channelDb = new ChannelDb({ fetchImpl: dbFetchImpl, cacheDir: storage.join(dataDir, 'cache'), storage });
   return {
     store,
     library,
