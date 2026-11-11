@@ -8,6 +8,12 @@ const { buildIndex, lookup } = require('../lib/channeldb.js');
 const { XmltvParser, loadGuide, parseTime } = require('../lib/epg.js');
 const { probe, sniff, checkAll } = require('../lib/probe.js');
 const { Library } = require('../lib/library.js');
+const { Store } = require('../lib/store.js');
+const nodeStorage = require('../lib/storage-node.js');
+const { memoryStorage } = require('../lib/storage-memory.js');
+const { DEFAULTS, pruneStatus, applyPatch } = require('../lib/state.js');
+const { createImports, decodeText } = require('../lib/imports.js');
+const contract = require('../platform/api-contract.js');
 const xtream = require('../lib/xtream.js');
 const codecs = require('../lib/codecs.js');
 const { Updates, notesText, friendlyError } = require('../lib/updates.js');
@@ -229,7 +235,7 @@ test('check: limits per server, retries passing failures once', async () => {
 test('playlists: import appends, skips duplicates, converts old playlists', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-lib-'));
   const store = { data: { playlists: [{ id: 'old1', name: 'Old', kind: 'file', source: '/x.m3u' }], activePlaylistId: '' }, save() {} };
-  const lib = new Library(store, dir, async () => '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n');
+  const lib = new Library(store, dir, async () => '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n', nodeStorage);
   try {
     const p = lib.create('Mine');
     const a = '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n#EXTINF:-1,Two\nhttp://a/2\n';
@@ -240,10 +246,10 @@ test('playlists: import appends, skips duplicates, converts old playlists', asyn
     await assert.rejects(lib.importText(p.id, 'hello'), /no channels/);
 
     // Read back from disk, as after a restart.
-    const again = new Library(store, dir);
+    const again = new Library(store, dir, null, nodeStorage);
     assert.deepStrictEqual((await again.channels(p.id)).map((c) => c.name), ['One', 'Two', 'Three']);
     await again.removeChannels(p.id, ['http://a/2']);
-    assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.url), ['http://a/1', 'http://a/3']);
+    assert.deepStrictEqual((await new Library(store, dir, null, nodeStorage).channels(p.id)).map((c) => c.url), ['http://a/1', 'http://a/3']);
 
     // A playlist from an older version holds no channels, only a file; it is converted on first use.
     const old = await lib.channels('old1');
@@ -306,7 +312,7 @@ test('xtream: reads logins, lists channels and movies, refreshes a playlist', as
     // Refreshing replaces the channels: new ones come in, ones the server dropped go.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-xt-'));
     const store = { data: { playlists: [], activePlaylistId: '' }, save() {} };
-    const lib = new Library(store, dir);
+    const lib = new Library(store, dir, null, nodeStorage);
     try {
       const p = lib.create('TV');
       await lib.addChannels(p.id, r.channels.slice(0, 2));
@@ -314,7 +320,7 @@ test('xtream: reads logins, lists channels and movies, refreshes a playlist', as
       const again = await xtream.loadAccount(fetch, { server: base, username: 'me', password: 'secret' });
       const res = await lib.replaceChannels(p.id, again.channels);
       assert.deepStrictEqual([res.added, res.removed, p.count], [1, 1, 2]);
-      assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.name), ['Sport', 'Kids']);
+      assert.deepStrictEqual((await new Library(store, dir, null, nodeStorage).channels(p.id)).map((c) => c.name), ['Sport', 'Kids']);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -427,6 +433,119 @@ test('startup: recovery after failed starts, and private details kept out', () =
   const url = startup.issueUrl({ owner: 'o', repo: 'r' }, { version: '1.3.0', platform: 'win32', arch: 'x64', error: 'boom' });
   assert.ok(url.startsWith('https://github.com/o/r/issues/new?labels=bug&title=Vibe%20TV%201.3.0'));
   assert.ok(decodeURIComponent(url).includes('boom'));
+});
+
+test('storage: settings are saved to a file in one step, and read back over the defaults', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-store-'));
+  const file = path.join(dir, 'deep', 'settings.json');
+  try {
+    const s = new Store(file, DEFAULTS, nodeStorage);
+    assert.deepStrictEqual(s.data, DEFAULTS);
+    s.data.favorites.push('http://a/1');
+    s.data.settings.volume = 0.5;
+    s.flush();
+    assert.deepStrictEqual(fs.readdirSync(path.dirname(file)), ['settings.json']); // no temporary file left behind
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), s.data);
+
+    // A file from an older version: missing settings take their defaults, unknown keys are dropped.
+    fs.writeFileSync(file, JSON.stringify({ favorites: ['x'], settings: { muted: true }, gone: 1 }));
+    const again = new Store(file, DEFAULTS, nodeStorage);
+    assert.deepStrictEqual([again.data.favorites, again.data.settings.muted, again.data.settings.volume, again.data.gone], [['x'], true, 1, undefined]);
+    assert.deepStrictEqual(DEFAULTS.favorites, []); // the defaults themselves are never written to
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('state: only what the window may change is taken from a patch', () => {
+  const data = structuredClone(DEFAULTS);
+  assert.deepStrictEqual(applyPatch(data, null), { changed: false, settings: false });
+  assert.deepStrictEqual(applyPatch(data, { favorites: ['a'], playlists: 'nope', activePlaylistId: 5 }), { changed: true, settings: false });
+  assert.deepStrictEqual([data.favorites, data.playlists, data.activePlaylistId], [['a'], [], '']);
+  assert.strictEqual(applyPatch(data, { settings: { muted: true } }).settings, true);
+  assert.deepStrictEqual([data.settings.muted, data.settings.volume], [true, 1]);
+
+  const now = Date.now();
+  data.status = { fresh: { s: 'ok', t: now - 1000 }, old: { s: 'dead', t: now - 40 * 24 * 3600 * 1000 }, broken: null };
+  pruneStatus(data, now);
+  assert.deepStrictEqual(Object.keys(data.status), ['fresh']);
+});
+
+test('backend without files: playlists, imports and settings on any storage (as on Android)', async () => {
+  const { createBackend } = require('../platform/android/backend.js');
+  const storage = memoryStorage();
+  await withServer((req, res) => {
+    if (req.url === '/lists/sports.m3u') return res.end('#EXTM3U\n#EXTINF:-1 group-title="Sport",One\nhttp://a/1\n');
+    if (req.url === '/latin1.m3u') return res.end(Buffer.from('#EXTM3U\n#EXTINF:-1,Caf\xe9\nhttp://a/2\n', 'latin1'));
+    res.statusCode = 404;
+    res.end();
+  }, async (base) => {
+    const b = await createBackend({ storage, fetchImpl: fetch, dataDir: 'data' });
+    assert.deepStrictEqual(b.store.data, DEFAULTS);
+
+    // From an address: the new playlist is named after the file.
+    const first = await b.imports.importUrl('', base + '/lists/sports.m3u');
+    assert.deepStrictEqual([first.created, first.added, first.playlist.name], [true, 1, 'sports']);
+    assert.match(first.playlist.id, /^[0-9a-f]{12}$/);
+    // Older playlists that are not UTF-8 still read correctly.
+    const second = await b.imports.importUrl(first.playlist.id, base + '/latin1.m3u');
+    assert.deepStrictEqual([second.created, second.added], [false, 1]);
+    assert.deepStrictEqual((await b.library.channels(first.playlist.id)).map((c) => c.name), ['One', 'Café']);
+    // A failed import of a new playlist leaves nothing behind.
+    await assert.rejects(b.imports.importUrl('', base + '/missing.m3u'), /download the playlist/);
+    await assert.rejects(b.imports.importUrl('', 'ftp://a/b'), /http:\/\/ or https:\/\//);
+    assert.strictEqual(b.library.playlists.length, 1);
+
+    // From picked files: one playlist for all of them, and a file that cannot be read is reported.
+    const picked = await b.imports.importTexts('', [
+      { name: 'My list.m3u8', read: async () => '#EXTM3U\n#EXTINF:-1,Three\nhttp://a/3\n' },
+      { name: 'broken.m3u', read: async () => { throw new Error('could not read it'); } },
+      { name: 'again.m3u', read: async () => '#EXTM3U\n#EXTINF:-1,Three\nhttp://a/3\n#EXTINF:-1,Four\nhttp://a/4\n' },
+    ]);
+    assert.deepStrictEqual([picked.created, picked.playlist.name, picked.added, picked.skipped, picked.errors], [true, 'My list', 2, 1, ['could not read it']]);
+    assert.strictEqual(await b.imports.importTexts('', []), null);
+
+    b.patchState({ favorites: ['http://a/1'], activePlaylistId: first.playlist.id });
+    b.store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepStrictEqual([...storage.files.keys()].sort(), [`data/playlists/${first.playlist.id}.json`, `data/playlists/${picked.playlist.id}.json`, 'data/settings.json'].sort());
+
+    // After a restart everything is still there.
+    const again = await createBackend({ storage, fetchImpl: fetch, dataDir: 'data' });
+    assert.deepStrictEqual([again.store.data.favorites, again.store.data.activePlaylistId], [['http://a/1'], first.playlist.id]);
+    assert.deepStrictEqual(again.library.playlists.map((p) => [p.name, p.count]), [['sports', 2], ['My list', 2]]);
+    assert.strictEqual((await again.library.channels(picked.playlist.id))[1].name, 'Four');
+  });
+  assert.strictEqual(decodeText(Buffer.from('é', 'utf8')), 'é');
+});
+
+test('platforms: preload.js offers exactly the calls and events of the contract', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const block = /exposeInMainWorld\('api', \{([\s\S]*?)\n\}\);/.exec(preload)[1];
+  const offered = [...block.matchAll(/^ {2}(\w+): /gm)].map((m) => m[1]);
+  assert.deepStrictEqual(offered.slice().sort(), Object.keys(contract.METHODS).sort());
+  const events = [.../const EVENTS = new Set\(\[([^\]]*)\]\)/.exec(preload)[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepStrictEqual(events.sort(), Object.keys(contract.EVENTS).sort());
+  // Every call the window makes is in the contract.
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  for (const m of app.matchAll(/\bapi\.(\w+)\(/g)) assert.ok(contract.METHODS[m[1]], `app.js calls api.${m[1]}, which is not in the contract`);
+});
+
+test('android: the web app builds, with nothing from Node in it', async () => {
+  const { build } = require('../scripts/build-android-web.js');
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-www-'));
+  try {
+    await build(out);
+    const html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
+    assert.ok(html.indexOf('platform-android.js') > 0 && html.indexOf('platform-android.js') < html.indexOf('<script src="app.js">'));
+    const bundle = fs.readFileSync(path.join(out, 'platform-android.js'), 'utf8');
+    assert.ok(!/\brequire\(["'](fs|path|crypto|child_process|electron)["']\)/.test(bundle));
+    assert.ok(!/\beval\(|new Function\(/.test(bundle), 'the page forbids eval');
+    for (const f of ['app.js', 'm3u.js', 'styles.css', 'credits.json', 'vendor/hls.min.js']) assert.ok(fs.existsSync(path.join(out, f)), f);
+    assert.ok(!fs.existsSync(path.join(out, 'recovery.html')));
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });
 
 (async () => {
