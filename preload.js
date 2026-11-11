@@ -55,6 +55,9 @@ contextBridge.exposeInMainWorld('api', {
   installUpdate: () => call('update:install'),
   setAutoUpdate: (on) => call('update:auto', on),
   openReleaseNotes: (version) => call('update:notes', version),
+
+  credits: () => call('credits:get'),
+  openCreditLink: (url) => call('credits:open', url),
   confirm: (opts) => call('dialog:confirm', opts),
   copyText: (text) => call('clipboard:write', text),
 

@@ -33,6 +33,8 @@ between them, and `lib/` holds the parts that can be tested without a window.
 1. Fork the repository and create a branch from `main`.
 2. Keep each pull request to one change, and describe what it does and how you checked it.
 3. Run `npm test` and make sure it passes. Add a check to `test/run.js` for logic you add to `lib/`.
+   If you add, remove or update a dependency (or a library in `src/vendor/`), run `npm run credits` and
+   commit `src/credits.json`, so the in-app Acknowledgements stay right; the tests check this.
 4. For anything visible, run the app (`npm start`) and try it, ideally in both light and dark mode;
    a screenshot in the pull request helps.
 5. Match the style around you: plain JavaScript, no frameworks in the window, small functions with a

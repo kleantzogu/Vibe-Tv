@@ -398,6 +398,16 @@ test('updates: release notes, errors, and running from source', async () => {
   assert.deepStrictEqual([u.state.status, (await u.check(true)).status], ['off', 'off']);
 });
 
+test('credits: the acknowledgements list matches what ships', () => {
+  const { spawnSync } = require('child_process');
+  const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'credits.js'), '--check'], { encoding: 'utf8' });
+  assert.strictEqual(r.status, 0, r.stderr || r.stdout);
+  const c = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'src', 'credits.json'), 'utf8'));
+  const names = c.sections.flatMap((s) => s.items.map((i) => i.name));
+  for (const n of ['hls.js', 'mpegts.js', 'dash.js', 'FFmpeg', 'Electron', 'electron-updater']) assert.ok(names.includes(n), n);
+  for (const s of c.sections) for (const i of s.items) assert.ok(i.license && i.url && i.purpose, i.name);
+});
+
 (async () => {
   let failed = 0;
   for (const [name, fn] of tests) {

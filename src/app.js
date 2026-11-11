@@ -753,6 +753,91 @@
   }
   api.on('update:state', renderUpdate);
 
+  /* ───────────────────────────── about & acknowledgements ───────────────────────────── */
+
+  // The About window (app menu ▸ About Vibe TV): the version and license, then every open-source
+  // component that ships in Vibe TV (src/credits.json, versions filled in live),
+  // with what it does here, its license (the full text, one click away) and a link to its source.
+  let credits = null;
+  const linkIcon = '<path d="M9.5 3H13v3.5M13 3L7.5 8.5M11 9.5V12a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h2.5"/>';
+
+  function creditItem(i) {
+    const box = h('div', 'cr-item');
+    const row = h('div', 'cr-row');
+    row.append(h('span', 'cr-name', i.name));
+    if (i.version) row.append(h('span', 'cr-ver', i.version));
+    row.append(h('span', 'spacer'));
+    const lic = h('button', 'cr-lic', i.license);
+    lic.type = 'button';
+    lic.setAttribute('aria-expanded', 'false');
+    lic.title = 'Show the license';
+    let panel = null;
+    lic.addEventListener('click', () => {
+      if (panel) {
+        panel.remove();
+        panel = null;
+        lic.setAttribute('aria-expanded', 'false');
+        return;
+      }
+      if (i.text) {
+        panel = h('pre', 'cr-text', i.text);
+      } else {
+        panel = h('p', 'cr-none', i.licenseUrl ? 'This license is published online. ' : 'This package doesn’t include its license text. ');
+        const b = h('button', 'text-btn', i.licenseUrl ? 'Read the license' : 'See the source');
+        b.addEventListener('click', () => api.openCreditLink(i.licenseUrl || i.url).catch((e) => toast(e.message)));
+        panel.appendChild(b);
+      }
+      box.appendChild(panel);
+      lic.setAttribute('aria-expanded', 'true');
+    });
+    const go = h('button', 'icon-btn cr-go');
+    go.type = 'button';
+    go.title = `Open ${i.url.replace(/^https:\/\//, '')}`;
+    go.setAttribute('aria-label', `Open the ${i.name} website`);
+    go.appendChild(svg(linkIcon));
+    go.addEventListener('click', () => api.openCreditLink(i.url).catch((e) => toast(e.message)));
+    row.append(lic, go);
+    box.append(row, h('div', 'cr-purpose', i.note ? `${i.purpose} (${i.note.toLowerCase()})` : i.purpose));
+    return box;
+  }
+
+  async function openCredits() {
+    if (document.querySelector('dialog[open]')) return;
+    try {
+      credits = await api.credits();
+    } catch (e) {
+      return toast(`Couldn’t load the acknowledgements: ${e.message}`);
+    }
+    $('crSub').textContent = `Version ${credits.app.version} · Free and open source (${credits.app.license} License)`;
+    $('crAppLicense').textContent = credits.app.text;
+    $('crAppLicense').hidden = true;
+    $('crLicense').setAttribute('aria-expanded', 'false');
+    const list = $('crList');
+    list.textContent = '';
+    for (const s of credits.sections) {
+      let sec;
+      if (s.collapsed) {
+        sec = document.createElement('details');
+        sec.className = 'cr-sec';
+        sec.appendChild(h('summary', '', `${s.title} (${s.items.length})`));
+      } else {
+        sec = h('section', 'cr-sec');
+        sec.appendChild(h('h3', '', s.title));
+      }
+      for (const i of s.items) sec.appendChild(creditItem(i));
+      list.appendChild(sec);
+    }
+    list.scrollTop = 0;
+    $('dlgCredits').showModal();
+  }
+  $('crSource').addEventListener('click', () => api.openCreditLink(credits.app.url).catch((e) => toast(e.message)));
+  $('crReleases').addEventListener('click', () => api.openCreditLink(credits.app.url + '/releases').catch((e) => toast(e.message)));
+  $('crLicense').addEventListener('click', () => {
+    const t = $('crAppLicense');
+    t.hidden = !t.hidden;
+    $('crLicense').setAttribute('aria-expanded', String(!t.hidden));
+  });
+
   /* ───────────────────────────── sidebar width ───────────────────────────── */
 
   // Drag the sidebar's right edge. Dragging well past the narrowest width tucks the sidebar away
@@ -969,6 +1054,7 @@
     renderRows();
     renderCount();
     renderEmpty();
+    renderRecentBar();
   }
 
   // The search field says how many channels it searches: "Search 12,120 channels".
@@ -1043,7 +1129,11 @@
     r._dot = h('span', 'dot');
     r._star = h('button', 'star');
     r._star.appendChild(svg(ICON.star));
-    side.append(r._badge, r._dot, r._star);
+    r._remove = h('button', 'row-remove');
+    r._remove.appendChild(svg('<path d="M4 4l8 8M12 4l-8 8"/>'));
+    r._remove.title = 'Remove from Recent (Delete)';
+    r._remove.setAttribute('aria-label', 'Remove from Recent');
+    side.append(r._badge, r._dot, r._star, r._remove);
     r.append(r._logo, main, side);
     return r;
   }
@@ -1074,6 +1164,7 @@
     r._star.classList.toggle('on', fav);
     r._star.title = fav ? 'Remove from favorites' : 'Add to favorites';
     r._star.setAttribute('aria-label', r._star.title);
+    r._remove.hidden = state.view.type !== 'recents';
   }
 
   let rowsQueued = false;
@@ -1118,6 +1209,7 @@
     const r = e.target.closest('.row');
     if (!r) return;
     if (e.target.closest('.star')) return toggleFavorite(r._c);
+    if (e.target.closest('.row-remove')) return removeRecent(r._c);
     state.cursor = r._i;
     play(r._c);
   });
@@ -1139,6 +1231,10 @@
     else if (e.key === 'Home') next = 0;
     else if (e.key === 'End') next = n - 1;
     else if (e.key === 'Enter' && state.cursor >= 0) { e.preventDefault(); return play(state.filtered[state.cursor]); }
+    else if ((e.key === 'Delete' || e.key === 'Backspace') && state.view.type === 'recents' && state.cursor >= 0) {
+      e.preventDefault();
+      return removeRecent(state.filtered[state.cursor]);
+    }
     else return;
     e.preventDefault();
     state.cursor = next;
@@ -1489,6 +1585,34 @@
     persist({ recents: state.recents });
   }
 
+  // Taking channels out of Recent. Both come with Undo rather than an "are you sure?".
+  function setRecents(recents) {
+    state.recents = recents;
+    persist({ recents: state.recents });
+    if (state.view.type === 'recents') applyFilter(false); // the selection stays on the same spot in the list
+  }
+  function removeRecent(c) {
+    if (!c) return;
+    const before = state.recents;
+    const after = before.filter((r) => r.url !== c.url);
+    if (after.length === before.length) return;
+    setRecents(after);
+    toast(`Removed ${c.name} from Recent`, 6000, { label: 'Undo', run: () => setRecents(before) });
+  }
+  function clearRecents() {
+    const before = state.recents;
+    if (!before.length) return;
+    setRecents([]);
+    toast(`Cleared ${plural(before.length, 'channel', 'channels')} from Recent`, 7000, { label: 'Undo', run: () => setRecents(before) });
+  }
+  $('btnClearRecent').addEventListener('click', clearRecents);
+
+  function renderRecentBar() {
+    const on = state.view.type === 'recents' && state.recents.length > 0;
+    $('recentBar').hidden = !on;
+    if (on) $('recentCount').textContent = plural(state.recents.length, 'recently watched channel', 'recently watched channels');
+  }
+
   async function channelMenu(c) {
     const fav = favUrls.has(c.url);
     const inPlaylist = state.view.type !== 'favorites' && state.view.type !== 'recents';
@@ -1499,7 +1623,10 @@
       { id: 'check', label: 'Check if Online' },
       { id: 'copy', label: 'Copy Stream Address' },
       ...(inPlaylist ? [{ type: 'separator' }, ...groupsOf(c).slice(0, 3).map((g) => ({ id: 'hide:' + g, label: `Hide Group “${g}”` })), { id: 'remove', label: 'Remove from Playlist' }] : []),
+      ...(state.view.type === 'recents' ? [{ type: 'separator' }, { id: 'unrecent', label: 'Remove from Recent' }, { id: 'clear-recent', label: 'Clear Recent' }] : []),
     ]);
+    if (id === 'unrecent') return removeRecent(c);
+    if (id === 'clear-recent') return clearRecents();
     if (id && id.startsWith('hide:')) hideGroup(id.slice(5));
     else if (id === 'play') play(c);
     else if (id === 'remove') removeFromPlaylist(c);
@@ -2132,33 +2259,32 @@
   });
 
   $('btnStopCheck').addEventListener('click', () => { if (state.checking) startCheck(); });
+  // The ⋯ menu: adding channels, then offline channels, then groups.
   $('btnMore').addEventListener('click', async () => {
     const hidden = state.hiddenOffline;
-    const id = await api.popupMenu([
-      { id: 'hide', label: hidden ? `Hide Offline Channels (${hidden.toLocaleString()} hidden)` : 'Hide Offline Channels', checked: !!state.settings.hideOffline },
-      { id: 'check', label: state.checking ? 'Stop Checking Channels' : 'Check Which Channels Are Online', enabled: state.channels.length > 0 || !!state.checking },
-      { type: 'separator' },
-      { id: 'groups', label: state.hidden.size ? `Manage Groups… (${state.hidden.size.toLocaleString()} hidden)` : 'Manage Groups…', enabled: state.channels.length > 0 },
-    ]);
-    if (id === 'hide') setHideOffline(!state.settings.hideOffline);
-    else if (id === 'check') startCheck();
-    else if (id === 'groups') openGroupManager();
-  });
-  $('btnPlaylist').addEventListener('click', playlistMenu);
-  $('btnImport').addEventListener('click', async () => {
     const p = activePlaylist();
     const id = await api.popupMenu([
       { id: 'file', label: p ? `Import M3U File into “${p.name}”…` : 'Import M3U File…' },
       { id: 'url', label: 'Import from URL…' },
       { id: 'xtream', label: 'Log In with Xtream Codes…' },
-      { type: 'separator' },
+      ...(p && p.xtream ? [{ id: 'refresh', label: 'Refresh from Server' }] : []),
       { id: 'new', label: 'New Playlist…' },
+      { type: 'separator' },
+      { id: 'hide', label: hidden ? `Hide Offline Channels (${hidden.toLocaleString()} hidden)` : 'Hide Offline Channels', checked: !!state.settings.hideOffline },
+      { id: 'check', label: state.checking ? 'Stop Checking Channels' : 'Check Which Channels Are Online', enabled: state.channels.length > 0 || !!state.checking },
+      { type: 'separator' },
+      { id: 'groups', label: state.hidden.size ? `Manage Groups… (${state.hidden.size.toLocaleString()} hidden)` : 'Manage Groups…', enabled: state.channels.length > 0 },
     ]);
     if (id === 'file') importFromPicker();
     else if (id === 'url') openUrlDialog();
     else if (id === 'xtream') openXtreamDialog();
+    else if (id === 'refresh') refreshFromServer(p);
     else if (id === 'new') newPlaylist();
+    else if (id === 'hide') setHideOffline(!state.settings.hideOffline);
+    else if (id === 'check') startCheck();
+    else if (id === 'groups') openGroupManager();
   });
+  $('btnPlaylist').addEventListener('click', playlistMenu);
   $('btnWelcomeFile').addEventListener('click', importFromPicker);
   $('btnWelcomeUrl').addEventListener('click', openUrlDialog);
   $('btnWelcomeXtream').addEventListener('click', openXtreamDialog);
@@ -2192,6 +2318,7 @@
     'manage-groups': () => state.channels.length && openGroupManager(),
     find: () => { peek(true); $('search').focus(); $('search').select(); },
     'quick-search': openSpot,
+    about: openCredits,
     'sidebar-toggle': toggleSidebar,
     'sidebar-show': () => setSidebarMode('show'),
     'sidebar-auto': () => setSidebarMode('auto'),

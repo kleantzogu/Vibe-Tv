@@ -352,6 +352,12 @@ const SIDEBAR_MODES = [
 ];
 
 // Update items, in the app menu on macOS and the Help menu elsewhere.
+// "About Vibe TV" opens the app's own About window (version, license, and every open-source component
+// it's built on), not the system's plain About box.
+function aboutMenuItem() {
+  return { label: 'About Vibe TV', click: () => send('menu', 'about') };
+}
+
 function updateMenuItems() {
   return [
     { id: 'check-updates', label: 'Check for Updates…', click: () => checkForUpdatesByHand() },
@@ -393,7 +399,7 @@ function buildMenu() {
       ? [{
           label: app.name,
           submenu: [
-            { role: 'about' },
+            aboutMenuItem(),
             { type: 'separator' },
             ...updateMenuItems(),
             { type: 'separator' },
@@ -466,7 +472,7 @@ function buildMenu() {
       ],
     },
     { role: 'windowMenu' },
-    ...(isMac ? [] : [{ label: 'Help', submenu: [...updateMenuItems(), { type: 'separator' }, { role: 'about' }] }]),
+    ...(isMac ? [] : [{ label: 'Help', submenu: [...updateMenuItems(), { type: 'separator' }, aboutMenuItem()] }]),
   ];
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
@@ -525,6 +531,29 @@ function registerIpc() {
   handle('update:notes', (version) => {
     const v = /^\d+\.\d+\.\d+(-[\w.]+)?$/.test(String(version || '')) ? `/tag/v${version}` : '';
     return shell.openExternal(RELEASES + v);
+  });
+
+  // Acknowledgements: the open-source components (src/credits.json, made by `npm run credits`) with the
+  // versions this copy really runs, and links that open in the browser (only the ones listed there).
+  handle('credits:get', async () => {
+    const credits = JSON.parse(fs.readFileSync(path.join(__dirname, 'src', 'credits.json'), 'utf8'));
+    const ff = converter ? await converter.about().catch(() => null) : null;
+    const live = {
+      electron: { version: process.versions.electron },
+      chromium: { version: process.versions.chrome },
+      node: { version: process.versions.node },
+      ffmpeg: ff ? { version: ff.version, license: ff.license, text: ff.text, note: ff.source === 'bundled' ? '' : 'The FFmpeg installed on this computer' } : { version: 'not found' },
+    };
+    for (const s of credits.sections) for (const item of s.items) if (item.id && live[item.id]) Object.assign(item, live[item.id]);
+    credits.app.version = app.getVersion();
+    return credits;
+  });
+  handle('credits:open', (url) => {
+    const credits = JSON.parse(fs.readFileSync(path.join(__dirname, 'src', 'credits.json'), 'utf8'));
+    const allowed = new Set([credits.app.url, RELEASES, `${credits.app.url}/blob/main/LICENSE`]);
+    for (const s of credits.sections) for (const i of s.items) for (const u of [i.url, i.source, i.licenseUrl]) if (u) allowed.add(u);
+    if (!allowed.has(url) || !/^https:\/\//.test(url)) throw new Error('That link is not in the acknowledgements');
+    return shell.openExternal(url);
   });
 
   handle('playlist:create', (name) => library.create(name));
@@ -706,14 +735,6 @@ if (!app.requestSingleInstanceLock()) {
 
   app.whenReady().then(() => {
     openStore();
-    // About box (App menu ▸ About Vibe TV): the app's name, version and icon, not Electron's.
-    app.setAboutPanelOptions({
-      applicationName: 'Vibe TV',
-      applicationVersion: app.getVersion(),
-      version: app.getVersion(),
-      copyright: `© ${new Date().getFullYear()} Vibe TV`,
-      iconPath: path.join(__dirname, 'src', 'icon.png'), // Windows and Linux; macOS uses the app icon
-    });
     // When run from source (npm start) macOS would show Electron's icon in the Dock.
     if (isMac && !app.isPackaged && app.dock) app.dock.setIcon(path.join(__dirname, 'build', 'icon-mac.png'));
     converter = new Converter();

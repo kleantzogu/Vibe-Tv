@@ -34,7 +34,9 @@
 
 Vibe TV is free and open source under the [MIT License](LICENSE): anyone can download it, use it,
 change it, share it, build on it or ship their own version, for any purpose. The only condition is
-keeping the license notice. Ideas, bug reports and pull requests are welcome: see
+keeping the license notice. The app lists every open-source project it's built on (with versions,
+licenses and links) in its About window: **Vibe TV ▸ About Vibe TV** on macOS, **Help ▸ About Vibe TV**
+on Windows and Linux. Ideas, bug reports and pull requests are welcome: see
 [CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately, as described in
 [SECURITY.md](SECURITY.md).
 
@@ -118,14 +120,14 @@ described in the [electron-builder documentation](https://www.electron.build/cod
 ## Using Vibe TV
 
 **Playlists.** Playlists are lists you make in the app. Import a `.m3u` / `.m3u8` file into one
-(File ▸ Import M3U File, the + button, or drop the file on the window), or import from a web
+(File ▸ Import M3U File, the ⋯ menu at the top of the sidebar, or drop the file on the window), or import from a web
 address. The channels are copied into the playlist, so the file is not needed afterwards; importing
 another file adds its channels, and channels that are already in the playlist are skipped. Switch,
 create, rename and delete playlists from the playlist name at the top of the sidebar. Right-click a
 channel to remove it from the playlist. With no playlist yet, an import makes one named after the file.
 
 **Xtream Codes.** If your provider gave you a server, username and password instead of a file, use
-File ▸ Log In with Xtream Codes (or the + button). The account's live channels, and optionally its
+File ▸ Log In with Xtream Codes (or the ⋯ menu). The account's live channels, and optionally its
 movies, go into a new playlist grouped by the provider's categories. The login is kept with that
 playlist (in the app's data folder, like the stream addresses that already contain it), so File ▸
 Refresh Playlist from Server reloads its channels later. Favorites and hidden groups survive a refresh.
@@ -173,6 +175,8 @@ their initials.
 
 **Favorites and recently watched.** Click the star on a channel (or press Ctrl/⌘+D for the one
 that is playing). Both are filters above the search field (Favorites, Recent) and are shared by all playlists.
+In Recent, hover a channel and click × (or select it and press Delete) to take it off the list, or
+click Clear at the top to empty it; both can be undone from the notification.
 
 **Offline channels.** In the ⋯ menu at the top of the sidebar, "Check Which Channels Are Online" tests
 every channel in the playlist and marks the ones that do not respond (a bar under the search field shows
@@ -276,6 +280,7 @@ src/               The window: index.html, styles.css, app.js, m3u.js (playlist 
 src/vendor/        hls.js 1.7.3, mpegts.js 1.8.2, dash.js 5.2.1, with their licenses
 scripts/start.js   `npm start`
 scripts/release.js `npm run release`
+scripts/credits.js `npm run credits`: writes src/credits.json, the Acknowledgements list
 .github/           CI and Release workflows, issue and pull request templates
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)

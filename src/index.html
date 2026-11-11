@@ -21,10 +21,7 @@
       <button id="btnSidebar" class="icon-btn" aria-label="Hide sidebar">
         <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6.5 3v10"/></svg>
       </button>
-      <button id="btnImport" class="icon-btn" title="Import an M3U playlist" aria-label="Import an M3U playlist">
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
-      </button>
-      <button id="btnMore" class="icon-btn" title="More: hide offline channels, check channels" aria-label="More options" aria-haspopup="menu">
+      <button id="btnMore" class="icon-btn" title="Import playlists, check channels, manage groups" aria-label="More options" aria-haspopup="menu">
         <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg>
       </button>
     </header>
@@ -50,6 +47,10 @@
       </div>
     </div>
 
+    <div id="recentBar" class="recent-bar" hidden>
+      <span id="recentCount"></span>
+      <button id="btnClearRecent" class="text-btn" title="Remove every channel from Recent">Clear</button>
+    </div>
     <div class="list-wrap">
       <div id="list" class="list" tabindex="0" role="listbox" aria-label="Channel list">
         <div id="listSpacer" class="list-spacer"></div>
@@ -252,6 +253,26 @@
       <span id="spotScope" class="spot-scope"></span>
     </div>
   </div>
+</dialog>
+
+<dialog id="dlgCredits" class="dialog dialog-credits" aria-label="About Vibe TV">
+  <header class="cr-head">
+    <img class="cr-icon" src="icon.png" alt="" width="56" height="56">
+    <div class="cr-title">
+      <h2 id="crTitle">Vibe TV</h2>
+      <p id="crSub" class="cr-sub"></p>
+    </div>
+    <button type="button" class="btn primary" data-close>Done</button>
+  </header>
+  <div class="cr-links">
+    <button type="button" id="crSource" class="chip">Source code</button>
+    <button type="button" id="crLicense" class="chip" aria-expanded="false">MIT License</button>
+    <button type="button" id="crReleases" class="chip">Releases</button>
+  </div>
+  <pre id="crAppLicense" class="cr-text" hidden></pre>
+  <h3 class="cr-ack">Acknowledgements</h3>
+  <p class="cr-intro">Vibe TV is free and open source, and it's built on these open-source projects. Thank you to everyone who makes them.</p>
+  <div id="crList" class="cr-list"></div>
 </dialog>
 
 <dialog id="dlgName" class="dialog">

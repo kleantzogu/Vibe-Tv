@@ -1,7 +1,7 @@
 {
   "name": "vibe-tv",
   "productName": "Vibe TV",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Vibe TV: a clean desktop player for M3U / IPTV playlists",
   "keywords": [
     "iptv",
@@ -31,7 +31,8 @@
     "start": "node scripts/start.js",
     "test": "node test/run.js",
     "dist": "electron-builder",
-    "release": "node scripts/release.js"
+    "release": "node scripts/release.js",
+    "credits": "node scripts/credits.js"
   },
   "devDependencies": {
     "electron": "44.10.0",
