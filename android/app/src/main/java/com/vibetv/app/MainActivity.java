@@ -9,6 +9,8 @@ public class MainActivity extends BridgeActivity {
     public void onCreate(Bundle savedInstanceState) {
         // The app's own plugins (platform/android/ in the web app calls them).
         registerPlugin(VibeDevicePlugin.class);
+        registerPlugin(VibeFilesPlugin.class);
+        registerPlugin(VibeHttpPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

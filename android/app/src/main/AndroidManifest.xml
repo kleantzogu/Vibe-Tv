@@ -7,9 +7,11 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
 
     <!-- usesCleartextTraffic: most IPTV servers speak plain http:// on a custom port.
-         banner: the 320x180 dp picture the TV launcher shows in its app row. -->
+         banner: the 320x180 dp picture the TV launcher shows in its app row.
+         allowBackup off: the app's files hold Xtream Codes logins, which should not be copied to a
+         cloud backup or to another device. -->
     <application
-        android:allowBackup="true"
+        android:allowBackup="false"
         android:icon="@mipmap/ic_launcher"
         android:banner="@drawable/tv_banner"
         android:label="@string/app_name"

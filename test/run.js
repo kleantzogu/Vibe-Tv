@@ -539,7 +539,8 @@ test('android: window.api offers the same calls as on a computer, and starts emp
   const make = (tv) => createApi({
     openBackend: () => createBackend({ storage: memoryStorage(), fetchImpl: fetch }),
     getDevice: async () => ({ tv, version: '9.9.9' }),
-    host: { confirm: async () => true, copyText: async () => {}, credits: async () => structuredClone(credits), openExternal: async (u) => { opened.push(u); } },
+    probeFetch: fetch,
+    host: { confirm: async () => true, copyText: async () => {}, credits: async () => structuredClone(credits), openExternal: async (u) => { opened.push(u); }, pickFiles: async () => null },
   });
   const { api, emit } = make(false);
   const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
@@ -562,9 +563,9 @@ test('android: window.api offers the same calls as on a computer, and starts emp
   assert.deepStrictEqual((await api.setHiddenGroups(p.id, ['News'])).hiddenGroups, ['News']);
   api.patchState({ activePlaylistId: p.id });
 
-  // Not there yet says so; what Android never needs answers quietly.
-  await assert.rejects(api.importUrl('', 'http://a/b.m3u'), /not available on Android yet/);
-  await assert.rejects(api.startCheck([]), /not available on Android yet/);
+  // What Android never needs answers quietly.
+  assert.deepStrictEqual([await api.importFiles('', ['/x.m3u']), await api.importPick('')], [null, null]);
+  await assert.rejects(make(true).api.init().then(() => 0) && (async () => { const t = make(true); await t.api.init(); return t.api.importPick(''); })(), /on a TV/);
   assert.deepStrictEqual([(await api.updateState()).status, (await api.mediaCaps({})).convert, await api.popupMenu([]), await api.convertInspect('x')], ['off', false, null, []]);
   assert.strictEqual(await api.confirm({ message: 'Sure?' }), true);
   assert.strictEqual((await api.credits()).app.version, '9.9.9');
@@ -577,6 +578,109 @@ test('android: window.api offers the same calls as on a computer, and starts emp
   emit('check:progress', [{ url: 'http://a/1', ok: true }]);
   assert.deepStrictEqual(got, [[{ url: 'http://a/1', ok: true }]]);
   assert.throws(() => api.on('nope', () => {}), /Unknown event/);
+});
+
+// The VibeHttp plugin, played by Node: the whole answer at once, as base64; a channel check ("sniff")
+// only gets the beginning of what is not a playlist.
+function fakeVibeHttp(seen = []) {
+  return {
+    async request({ url, headers, maxBytes, sniff }) {
+      seen.push({ url, headers, sniff: !!sniff });
+      let res;
+      try {
+        res = await fetch(url, { headers });
+      } catch (e) {
+        throw new Error('ECONNREFUSED');
+      }
+      let body = res.ok ? Buffer.from(await res.arrayBuffer()) : Buffer.alloc(0);
+      if (sniff && !body.toString('latin1', 0, 8).startsWith('#EXT')) body = body.subarray(0, 64 * 1024);
+      const truncated = !!maxBytes && body.length > maxBytes;
+      if (truncated) body = body.subarray(0, maxBytes);
+      return { status: res.status, url: res.url, contentType: res.headers.get('content-type') || '', truncated, body: body.toString('base64') };
+    },
+  };
+}
+
+test('android: storage, imports and channel checks through the native plugins', async () => {
+  const { createApi } = require('../platform/android/api.js');
+  const { createBackend } = require('../platform/android/backend.js');
+  const { nativeStorage } = require('../platform/android/storage-native.js');
+  const { createNativeFetch } = require('../platform/android/native-fetch.js');
+
+  // The VibeFiles plugin, played by a Map.
+  const disk = new Map();
+  const files = {
+    read: async ({ path: p }) => (disk.has(p) ? { data: disk.get(p) } : { missing: true }),
+    write: async ({ path: p, data }) => { disk.set(p, data); },
+    remove: async ({ path: p }) => { disk.delete(p); },
+  };
+  const seen = [];
+  const http = fakeVibeHttp(seen);
+  const ts = tsPackets([[0x1b, 0x100], [0x0f, 0x101]]);
+  const big = '#EXTM3U\n' + Array.from({ length: 20000 }, (_, i) => `#EXTINF:-1 tvg-id="c${i}.us" group-title="Group ${i % 40}",Channel ${i}\nhttp://tv.example/live/${i}.ts`).join('\n');
+
+  await withServer((req, res) => {
+    if (req.url === '/big.m3u') return res.end(big);
+    if (req.url === '/latin1.m3u') return res.end(Buffer.from('#EXTM3U\n#EXTINF:-1,Caf\xe9\nhttp://a/2\n', 'latin1'));
+    if (req.url === '/live.ts') { res.setHeader('Content-Type', 'video/mp2t'); return res.end(Buffer.concat(Array(40).fill(ts))); }
+    if (req.url === '/needs-agent.m3u8') {
+      if (req.headers['user-agent'] !== 'Box/1' || req.headers.referer !== 'http://ref.example/') { res.statusCode = 403; return res.end(); }
+      return res.end('#EXTM3U\n#EXTINF:4,\nseg.ts\n');
+    }
+    if (req.url === '/api/channels.json') return res.end(JSON.stringify([{ id: 'c1.us', categories: ['news'] }]));
+    if (req.url === '/api/logos.json') return res.end(JSON.stringify([{ channel: 'c1.us', feed: null, in_use: true, format: 'PNG', width: 300, url: 'https://x/c1.png' }]));
+    if (req.url === '/api/categories.json') return res.end(JSON.stringify([{ id: 'news', name: 'News' }]));
+    res.statusCode = 404;
+    res.end();
+  }, async (base) => {
+    const make = (tv, picked) => createApi({
+      openBackend: async () => {
+        const b = await createBackend({ storage: nativeStorage(files), fetchImpl: createNativeFetch(http, { maxBytes: 8 * 1024 * 1024 }), dbFetchImpl: fetch, dataDir: 'data' });
+        b.channelDb.api = base + '/api';
+        return b;
+      },
+      getDevice: async () => ({ tv, version: '1.0.0' }),
+      probeFetch: createNativeFetch(http, { sniff: true }),
+      host: { confirm: async () => true, copyText: async () => {}, credits: async () => ({}), openExternal: async () => {}, pickFiles: async () => picked },
+    });
+    const { api, flush } = make(false, [{ name: 'Picked.m3u', read: async () => '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1\n' }]);
+    await api.init();
+
+    // A 20,000-channel playlist by address, a second file that is not UTF-8, and a picked file.
+    const r = await api.importUrl('', base + '/big.m3u');
+    assert.deepStrictEqual([r.created, r.added, r.playlist.name, r.playlist.count], [true, 20000, 'big', 20000]);
+    assert.strictEqual((await api.importUrl(r.playlist.id, base + '/latin1.m3u')).added, 1);
+    const picked = await api.importPick('');
+    assert.deepStrictEqual([picked.created, picked.playlist.name, picked.added], [true, 'Picked', 1]);
+    await assert.rejects(api.importUrl('', base + '/missing.m3u'), /download the playlist.*404/);
+    await assert.rejects(createNativeFetch(http, { maxBytes: 1024 })(base + '/big.m3u'), /too large/);
+    assert.deepStrictEqual(await api.lookupChannels(['c1.us', 'c2.us']), { 'c1.us': { logo: 'https://x/c1.png', groups: ['News'] } });
+
+    // Channel checks: only the start of a stream is read, with the channel's own headers.
+    const p = await api.probe(base + '/live.ts', null);
+    assert.deepStrictEqual([p.ok, p.kind, p.streams.map((x) => x.codec)], [true, 'mpegts', ['h264', 'aac']]);
+    assert.strictEqual((await api.probe(base + '/needs-agent.m3u8', null)).ok, false);
+    assert.strictEqual((await api.probe(base + '/needs-agent.m3u8', { userAgent: 'Box/1', referrer: 'http://ref.example/' })).ok, true);
+    assert.ok(seen.some((x) => x.sniff && x.headers['User-Agent'] === 'Box/1'));
+    const progress = [];
+    api.on('check:progress', (batch) => progress.push(...batch));
+    assert.deepStrictEqual(await api.startCheck([{ url: base + '/live.ts' }, { url: base + '/gone.ts' }]), { cancelled: false });
+    assert.deepStrictEqual(progress.sort((a, b) => a.url.localeCompare(b.url)), [{ url: base + '/gone.ts', ok: false }, { url: base + '/live.ts', ok: true }]);
+
+    // Everything is in the app's files, and still there when the app is opened again.
+    api.patchState({ favorites: [{ url: 'http://a/1' }], activePlaylistId: r.playlist.id });
+    flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepStrictEqual([...disk.keys()].sort(), ['data/cache/channel-db.json', `data/playlists/${picked.playlist.id}.json`, `data/playlists/${r.playlist.id}.json`, 'data/settings.json'].sort());
+    const again = make(false, null).api;
+    const init = await again.init();
+    assert.deepStrictEqual([init.state.playlists.map((x) => x.count), init.state.activePlaylistId, init.state.favorites], [[20001, 1], r.playlist.id, [{ url: 'http://a/1' }]]);
+    const channels = await again.playlistChannels(r.playlist.id);
+    assert.deepStrictEqual([channels.length, channels[19999].name, channels[20000].name], [20001, 'Channel 19999', 'Café']);
+
+    await again.removePlaylist(picked.playlist.id);
+    assert.ok(!disk.has(`data/playlists/${picked.playlist.id}.json`));
+  });
 });
 
 test('android: the web app builds, with nothing from Node in it', async () => {
