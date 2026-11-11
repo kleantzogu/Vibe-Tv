@@ -1,0 +1,403 @@
+'use strict';
+/* Self-contained checks for the parts that do not need a window: `npm test` */
+const assert = require('assert');
+const http = require('http');
+const zlib = require('zlib');
+const M3U = require('../src/m3u.js');
+const { buildIndex, lookup } = require('../lib/channeldb.js');
+const { XmltvParser, loadGuide, parseTime } = require('../lib/epg.js');
+const { probe, sniff, checkAll } = require('../lib/probe.js');
+const { Library } = require('../lib/library.js');
+const xtream = require('../lib/xtream.js');
+const codecs = require('../lib/codecs.js');
+const { inputArgs, cleanError, parseStreams } = require('../lib/convert.js');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
+
+const tests = [];
+const test = (name, fn) => tests.push([name, fn]);
+
+test('playlist: attributes, names with commas, quality and tags', () => {
+  const { channels, epgUrl } = M3U.parse(
+    '\uFEFF#EXTM3U url-tvg="http://guide.example/a.xml.gz,http://guide.example/b.xml"\r\n' +
+      '#EXTINF:-1 tvg-id="ABC.us@East" tvg-logo="https://img.example/abc.png" group-title="News;Local",ABC, East Coast (1080p) [Geo-blocked]\r\n' +
+      'https://a.example/abc.m3u8\r\n' +
+      '#EXTINF:-1 tvg-id="",Plain (Hawaii) (720p) [Not 24/7]\n' +
+      '#EXTVLCOPT:http-referrer=https://ref.example/\n' +
+      '#EXTVLCOPT:http-user-agent=Agent/1.0 (X11)\n' +
+      'http://b.example/live\n' +
+      '#EXTINF:0,Kodi style\n' +
+      'http://c.example/s.m3u8|User-Agent=K%2F1&Referer=http://k.example/\n' +
+      'http://d.example/path/cool-channel/index.m3u8\n'
+  );
+  assert.strictEqual(epgUrl, 'http://guide.example/a.xml.gz');
+  assert.strictEqual(channels.length, 4);
+  assert.deepStrictEqual(
+    [channels[0].name, channels[0].quality, channels[0].tags, channels[0].groups, channels[0].logo, channels[0].tvgId],
+    ['ABC, East Coast', '1080p', ['Geo-blocked'], ['News', 'Local'], 'https://img.example/abc.png', 'ABC.us@East']
+  );
+  assert.deepStrictEqual([channels[1].name, channels[1].quality, channels[1].tags], ['Plain (Hawaii)', '720p', ['Not 24/7']]);
+  assert.deepStrictEqual(channels[1].headers, { referrer: 'https://ref.example/', userAgent: 'Agent/1.0 (X11)' });
+  assert.strictEqual(channels[2].url, 'http://c.example/s.m3u8');
+  assert.deepStrictEqual(channels[2].headers, { userAgent: 'K/1', referrer: 'http://k.example/' });
+  assert.strictEqual(channels[3].name, 'cool-channel');
+  assert.strictEqual(channels[3].headers, null);
+});
+
+test('playlist: search folding', () => {
+  assert.strictEqual(M3U.fold('Télé Québec'), 'tele quebec');
+  assert.strictEqual(M3U.matchKey('CNBC HD'), M3U.matchKey('cnbc'));
+});
+
+test('channel database: best logo and categories', () => {
+  const index = buildIndex(
+    [{ id: 'ABC.us', categories: ['general', 'news'] }],
+    [
+      { channel: 'ABC.us', feed: null, in_use: false, format: 'PNG', width: 300, url: 'https://x/old.png' },
+      { channel: 'ABC.us', feed: null, in_use: true, format: 'PNG', width: 300, url: 'https://x/new.png' },
+      { channel: 'ABC.us', feed: 'West', in_use: true, format: 'PNG', width: 300, url: 'https://x/west.png' },
+      { channel: 'OnlyFeed.us', feed: 'HD', in_use: true, format: 'SVG', width: 300, url: 'https://x/feed.svg' },
+    ],
+    [{ id: 'general', name: 'General' }, { id: 'news', name: 'News' }]
+  );
+  const r = lookup(index, ['ABC.us@East', 'ABC.us@West', 'OnlyFeed.us@SD', 'Nope.us']);
+  assert.deepStrictEqual(r['ABC.us@East'], { logo: 'https://x/new.png', groups: ['General', 'News'] });
+  assert.strictEqual(r['ABC.us@West'].logo, 'https://x/west.png');
+  assert.strictEqual(r['OnlyFeed.us@SD'].logo, 'https://x/feed.svg');
+  assert.strictEqual(r['Nope.us'], undefined);
+});
+
+const stamp = (t) => new Date(t).toISOString().replace(/[-:T]/g, '').slice(0, 14) + ' +0000';
+function sampleGuide(now) {
+  let xml = '<?xml version="1.0"?><tv><channel id="One.us"><display-name>One</display-name></channel><channel id="n-2"><display-name>Two HD</display-name></channel><channel id="Skip.us"><display-name>Skip</display-name></channel>';
+  for (const ch of ['One.us', 'n-2', 'Skip.us']) {
+    for (let i = -30; i < 60; i++) {
+      xml += `<programme start="${stamp(now + i * 3600e3)}" stop="${stamp(now + (i + 1) * 3600e3)}" channel="${ch}"><title lang="en">Show ${i} &amp; co</title><desc>About ${i}</desc></programme>`;
+    }
+  }
+  return xml + '</tv>';
+}
+
+test('guide: time zones', () => {
+  assert.strictEqual(parseTime('20261111183000 +0100'), Date.UTC(2026, 10, 11, 17, 30));
+  assert.strictEqual(parseTime('20261111183000 -0530'), Date.UTC(2026, 10, 12, 0, 0));
+  assert.strictEqual(parseTime('20261111183000'), Date.UTC(2026, 10, 11, 18, 30));
+});
+
+test('guide: streaming parser keeps wanted channels inside the time window', () => {
+  const now = Date.UTC(2026, 10, 11, 12);
+  const xml = sampleGuide(now);
+  for (const size of [5, 333, xml.length]) {
+    const p = new XmltvParser({ wantedIds: new Set(['one.us']), wantedNames: new Set([M3U.matchKey('Two')]), from: now - 6 * 3600e3, to: now + 48 * 3600e3 });
+    for (let i = 0; i < xml.length; i += size) p.write(xml.slice(i, i + size));
+    const g = p.finish();
+    assert.deepStrictEqual(Object.keys(g.programmes).sort(), ['n-2', 'one.us']);
+    assert.strictEqual(g.nameIndex[M3U.matchKey('Two')], 'n-2');
+    assert.strictEqual(g.programmes['one.us'].length, 56);
+    assert.strictEqual(g.programmes['one.us'][0][2], 'Show -7 & co');
+  }
+});
+
+test('file reading: waits for cloud files, then explains what to do', async () => {
+  const { readFileRetry, explainReadError } = require('../lib/readfile.js');
+  const err = (code) => Object.assign(new Error(code), { code });
+  let calls = 0;
+  let waiting = 0;
+  let nudged = 0;
+  const flaky = async () => { if (++calls < 3) throw err('ETIMEDOUT'); return Buffer.from('#EXTM3U'); };
+  const opts = { delays: [5, 5, 5], nudge: () => nudged++, onWaiting: () => waiting++ };
+  assert.strictEqual(String(await readFileRetry('/x', { ...opts, read: flaky })), '#EXTM3U');
+  assert.deepStrictEqual([calls, waiting, nudged], [3, 1, 1]);
+  calls = 0;
+  await assert.rejects(readFileRetry('/x', { ...opts, read: async () => { calls++; throw err('EDEADLK'); } }), /EDEADLK/);
+  assert.strictEqual(calls, 4); // first try + three retries
+  calls = 0;
+  await assert.rejects(readFileRetry('/x', { ...opts, read: async () => { calls++; throw err('ENOENT'); } }), /ENOENT/);
+  assert.strictEqual(calls, 1); // a missing file is not retried
+  calls = 0;
+  await assert.rejects(readFileRetry('/x', { ...opts, delays: [50, 50], deadline: 20, read: async () => { calls++; throw err('ETIMEDOUT'); } }));
+  assert.strictEqual(calls, 1); // gives up once the overall deadline would be passed
+  assert.match(explainReadError(err('ETIMEDOUT'), '/f.m3u', 'darwin').long, /Download Now/);
+  assert.match(explainReadError(err('ETIMEDOUT'), 'C:\\f.m3u', 'win32').long, /downloaded to this computer/);
+  assert.match(explainReadError(err('ENOENT'), '/f.m3u').long, /moved or deleted/);
+  assert.match(explainReadError(err('EPERM'), '/f.m3u', 'darwin').long, /Privacy & Security/);
+});
+
+async function withServer(handler, fn) {
+  const srv = http.createServer(handler);
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  try {
+    await fn('http://127.0.0.1:' + srv.address().port);
+  } finally {
+    srv.closeAllConnections();
+    srv.close();
+  }
+}
+
+test('guide: gzip download', async () => {
+  const xml = sampleGuide(Date.now());
+  await withServer((req, res) => {
+    if (req.url === '/g.xml.gz') res.end(zlib.gzipSync(xml));
+    else if (req.url === '/bad') res.end('<html>nope</html>');
+    else { res.statusCode = 404; res.end(); }
+  }, async (base) => {
+    const g = await loadGuide(fetch, base + '/g.xml.gz', { wantedIds: ['one.us'] });
+    assert.ok(g.programmes['one.us'].length > 40);
+    await assert.rejects(loadGuide(fetch, base + '/bad', {}), /XMLTV/);
+    await assert.rejects(loadGuide(fetch, base + '/missing', {}), /404/);
+  });
+});
+
+test('probe: stream kinds and dead streams', async () => {
+  assert.strictEqual(sniff(Buffer.from('#EXTM3U\n'), ''), 'hls');
+  assert.strictEqual(sniff(Buffer.from([0x47, 0x40, 0x00]), ''), 'mpegts');
+  assert.strictEqual(sniff(Buffer.from('<?xml version="1.0"?><MPD xmlns="x">'), ''), 'dash');
+  assert.strictEqual(sniff(Buffer.from('<!DOCTYPE html><html>'), 'text/html'), 'webpage');
+  await withServer((req, res) => {
+    if (req.url === '/master.m3u8') res.end('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\nmedia.m3u8\n');
+    else if (req.url === '/media.m3u8') res.end('#EXTM3U\n#EXTINF:2,\ns0.ts\n');
+    else if (req.url === '/deadmaster.m3u8') res.end('#EXTM3U\n#EXT-X-STREAM-INF:BANDWIDTH=1\ngone.m3u8\n');
+    else if (req.url === '/ts') res.end(Buffer.alloc(188 * 20, 0x47));
+    else if (req.url === '/hang') { /* never answers */ }
+    else { res.statusCode = 404; res.end(); }
+  }, async (base) => {
+    assert.deepStrictEqual(await probe(fetch, base + '/master.m3u8'), { ok: true, kind: 'hls', status: 200 });
+    assert.strictEqual((await probe(fetch, base + '/deadmaster.m3u8')).ok, false);
+    assert.deepStrictEqual(await probe(fetch, base + '/ts'), { ok: true, kind: 'mpegts', status: 200 });
+    assert.strictEqual((await probe(fetch, base + '/nope')).status, 404);
+    assert.strictEqual((await probe(fetch, base + '/hang', null, { timeout: 500 })).reason, 'timeout');
+    assert.strictEqual((await probe(fetch, 'rtmp://x/y')).reason, 'unsupported');
+  });
+});
+
+test('check: limits per server, retries passing failures once', async () => {
+  const ts = Buffer.alloc(188 * 4, 0x47);
+  const running = new Map();
+  const peak = new Map();
+  const calls = new Map();
+  let total = 0;
+  let peakTotal = 0;
+  const fakeFetch = async (url) => {
+    const host = new URL(url).host;
+    calls.set(url, (calls.get(url) || 0) + 1);
+    running.set(host, (running.get(host) || 0) + 1);
+    peak.set(host, Math.max(peak.get(host) || 0, running.get(host)));
+    peakTotal = Math.max(peakTotal, ++total);
+    await new Promise((r) => setTimeout(r, 10));
+    running.set(host, running.get(host) - 1);
+    total--;
+    const path = new URL(url).pathname;
+    const n = calls.get(url);
+    if (path === '/flaky' && n === 1) return new Response('', { status: 503 });
+    if (path === '/busy') return new Response('', { status: 403 });
+    if (path === '/gone') return new Response('', { status: 404 });
+    return new Response(ts, { status: 200 });
+  };
+  const items = [
+    ...Array.from({ length: 20 }, (_, i) => ({ url: `http://iptv.example:8080/u/p/${i}` })),
+    ...Array.from({ length: 6 }, (_, i) => ({ url: `http://other.example/${i}` })),
+    { url: 'http://iptv.example:8080/flaky' },
+    { url: 'http://iptv.example:8080/busy' },
+    { url: 'http://iptv.example:8080/gone' },
+  ];
+  const results = new Map();
+  const run = checkAll(fakeFetch, items, { concurrency: 5, perHost: 3, onResult: (it, r) => {
+    assert.ok(!results.has(it.url), 'reported once');
+    results.set(it.url, r);
+  } });
+  assert.deepStrictEqual(await run.done, { cancelled: false });
+  assert.strictEqual(results.size, items.length);
+  assert.strictEqual(peak.get('iptv.example:8080'), 3);
+  assert.ok(peakTotal <= 5 && peakTotal > 3, 'other servers fill the remaining slots');
+  assert.strictEqual(results.get('http://iptv.example:8080/flaky').ok, true);
+  assert.strictEqual(calls.get('http://iptv.example:8080/flaky'), 2);
+  assert.strictEqual(results.get('http://iptv.example:8080/busy').status, 403);
+  assert.strictEqual(calls.get('http://iptv.example:8080/busy'), 2);
+  assert.strictEqual(calls.get('http://iptv.example:8080/gone'), 1, 'a 404 is not retried');
+
+  // Cancelling stops new probes and still settles.
+  let seen = 0;
+  const c = checkAll(fakeFetch, items, { concurrency: 2, perHost: 2, onResult: () => { seen++; } });
+  setTimeout(() => c.cancel(), 25);
+  assert.deepStrictEqual(await c.done, { cancelled: true });
+  assert.ok(seen < items.length);
+});
+
+test('playlists: import appends, skips duplicates, converts old playlists', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-lib-'));
+  const store = { data: { playlists: [{ id: 'old1', name: 'Old', kind: 'file', source: '/x.m3u' }], activePlaylistId: '' }, save() {} };
+  const lib = new Library(store, dir, async () => '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n');
+  try {
+    const p = lib.create('Mine');
+    const a = '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n#EXTINF:-1,Two\nhttp://a/2\n';
+    const b = '#EXTM3U\n#EXTINF:-1,Two again\nhttp://a/2\n#EXTINF:-1,Three\nhttp://a/3\n';
+    assert.deepStrictEqual([(await lib.importText(p.id, a)).added, (await lib.importText(p.id, b)).added], [2, 1]);
+    assert.strictEqual((await lib.importText(p.id, a)).skipped, 2);
+    assert.strictEqual(p.count, 3);
+    await assert.rejects(lib.importText(p.id, 'hello'), /no channels/);
+
+    // Read back from disk, as after a restart.
+    const again = new Library(store, dir);
+    assert.deepStrictEqual((await again.channels(p.id)).map((c) => c.name), ['One', 'Two', 'Three']);
+    await again.removeChannels(p.id, ['http://a/2']);
+    assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.url), ['http://a/1', 'http://a/3']);
+
+    // A playlist from an older version holds no channels, only a file; it is converted on first use.
+    const old = await lib.channels('old1');
+    assert.deepStrictEqual([old.length, old[0].groups], [1, ['News']]);
+    assert.strictEqual(store.data.playlists[0].source, undefined);
+    assert.ok(fs.existsSync(path.join(dir, 'old1.json')));
+
+    // Hidden groups are kept per playlist, without duplicates.
+    assert.deepStrictEqual(lib.setHiddenGroups(p.id, ['News', 'News', '\u0000ungrouped', 5]).hiddenGroups, ['News', '\u0000ungrouped']);
+
+    await lib.remove(p.id);
+    assert.ok(!fs.existsSync(path.join(dir, `${p.id}.json`)));
+    assert.deepStrictEqual(store.data.playlists.map((x) => x.id), ['old1']);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('xtream: reads logins, lists channels and movies, refreshes a playlist', async () => {
+  assert.deepStrictEqual(
+    xtream.normalizeLogin({ server: 'http://tv.example:8080/get.php?username=me&password=p%20w&type=m3u_plus' }),
+    { server: 'http://tv.example:8080', username: 'me', password: 'p w' }
+  );
+  assert.strictEqual(xtream.normalizeLogin({ server: 'tv.example:81/', username: ' me ', password: 'x' }).server, 'http://tv.example:81');
+  assert.throws(() => xtream.normalizeLogin({ server: 'tv.example' }), /username/);
+  assert.deepStrictEqual([xtream.liveExtension([]), xtream.liveExtension(['m3u8', 'ts']), xtream.liveExtension(['m3u8'])], ['ts', 'ts', 'm3u8']);
+
+  let live = [
+    { num: 1, name: 'News One (1080p)', stream_id: 11, stream_icon: 'http://img/1.png', epg_channel_id: 'one.us', category_id: '5' },
+    { num: 2, name: 'Sport', stream_id: 12, stream_icon: '', category_id: '9', category_ids: [9, 5] },
+  ];
+  await withServer((req, res) => {
+    const q = new URL(req.url, 'http://x').searchParams;
+    if (!req.url.startsWith('/player_api.php')) { res.statusCode = 404; return res.end(); }
+    if (q.get('password') !== 'secret') return res.end(JSON.stringify({ user_info: { auth: 0 } }));
+    const action = q.get('action') || '';
+    const body = {
+      '': { user_info: { auth: 1, status: 'Active', exp_date: String(Math.floor(Date.now() / 1000) + 86400), max_connections: '2', allowed_output_formats: ['m3u8', 'ts'] } },
+      get_live_categories: [{ category_id: '5', category_name: 'News' }, { category_id: '9', category_name: 'Sports' }],
+      get_live_streams: live,
+      get_vod_categories: [{ category_id: '1', category_name: 'Action' }],
+      get_vod_streams: [{ name: 'A Film', stream_id: 70, container_extension: 'mkv', category_id: '1' }],
+    }[action];
+    res.end(JSON.stringify(body === undefined ? [] : body));
+  }, async (base) => {
+    await assert.rejects(xtream.loadAccount(fetch, { server: base, username: 'me', password: 'nope' }), /not accepted/);
+    await assert.rejects(xtream.loadAccount(fetch, { server: base + '/elsewhere', username: 'me', password: 'secret' }), /reach the server|404/);
+
+    const r = await xtream.loadAccount(fetch, { server: base + '/player_api.php', username: 'me', password: 'secret' }, { movies: true });
+    assert.deepStrictEqual([r.live, r.movies, r.account.maxConnections], [2, 1, 2]);
+    assert.ok(r.account.expires > Date.now());
+    const [one, sport, film] = r.channels;
+    assert.deepStrictEqual(
+      [one.name, one.quality, one.url, one.tvgId, one.number, one.groups],
+      ['News One', '1080p', `${base}/live/me/secret/11.ts`, 'one.us', '1', ['News']]
+    );
+    assert.deepStrictEqual(sport.groups, ['Sports', 'News']);
+    assert.deepStrictEqual([film.url, film.groups], [`${base}/movie/me/secret/70.mkv`, ['Movies: Action']]);
+
+    // Refreshing replaces the channels: new ones come in, ones the server dropped go.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-xt-'));
+    const store = { data: { playlists: [], activePlaylistId: '' }, save() {} };
+    const lib = new Library(store, dir);
+    try {
+      const p = lib.create('TV');
+      await lib.addChannels(p.id, r.channels.slice(0, 2));
+      live = [live[1], { name: 'Kids', stream_id: 13, category_id: '5' }];
+      const again = await xtream.loadAccount(fetch, { server: base, username: 'me', password: 'secret' });
+      const res = await lib.replaceChannels(p.id, again.channels);
+      assert.deepStrictEqual([res.added, res.removed, p.count], [1, 1, 2]);
+      assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.name), ['Sport', 'Kids']);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+// Builds MPEG-TS packets: a PAT, a PMT listing the given streams, and optionally one audio PES.
+function tsPackets(streams, audioFrame) {
+  const packet = (pid, payload, start = true) => {
+    const b = Buffer.alloc(188, 0xff);
+    b[0] = 0x47; b[1] = (start ? 0x40 : 0) | (pid >> 8); b[2] = pid & 0xff; b[3] = 0x10;
+    payload.copy(b, 4);
+    return b;
+  };
+  const section = (tableId, body) => {
+    const len = body.length + 4; // + CRC (not checked)
+    return Buffer.concat([Buffer.from([0, tableId, 0xb0 | (len >> 8), len & 0xff]), body, Buffer.alloc(4)]);
+  };
+  const pat = section(0x00, Buffer.from([0, 1, 0xc1, 0, 0, 0, 1, 0xf0, 0x00])); // program 1 -> PMT PID 0x1000
+  const entries = streams.map(([type, pid, desc = []]) => Buffer.from([type, 0xe0 | (pid >> 8), pid & 0xff, 0xf0, desc.length, ...desc]));
+  const pmt = section(0x02, Buffer.concat([Buffer.from([0, 1, 0xc1, 0, 0, 0xe1, 0x00, 0xf0, 0x00]), ...entries]));
+  const out = [packet(0, pat), packet(0x1000, pmt)];
+  if (audioFrame) {
+    const [pid, header] = audioFrame;
+    out.push(packet(pid, Buffer.from([0, 0, 1, 0xc0, 0, 0, 0x80, 0x80, 0, ...header])));
+  }
+  return Buffer.concat(out);
+}
+
+test('codecs: reads the MPEG-TS program map and decides what to convert', () => {
+  const kinds = (buf) => codecs.tsStreams(buf).streams.map((x) => `${x.kind}:${x.codec}`);
+  assert.deepStrictEqual(kinds(tsPackets([[0x1b, 0x100], [0x0f, 0x101]])), ['video:h264', 'audio:aac']);
+  assert.deepStrictEqual(kinds(tsPackets([[0x02, 0x100], [0x81, 0x101]])), ['video:mpeg2video', 'audio:ac3']);
+  // DVB private streams say what they are in descriptors: E-AC-3, AC-3, teletext; registration 'Opus'.
+  assert.deepStrictEqual(kinds(tsPackets([[0x24, 0x100], [0x06, 0x101, [0x7a, 0]], [0x06, 0x102, [0x6a, 0]], [0x06, 0x103, [0x56, 0]], [0x06, 0x104, [0x05, 4, 0x4f, 0x70, 0x75, 0x73]]])),
+    ['video:hevc', 'audio:eac3', 'audio:ac3', 'data:teletext', 'audio:opus']);
+  // MPEG audio: the frame header tells MP3 (layer III) from MP2 (layer II); unknown counts as MP2.
+  assert.deepStrictEqual(kinds(tsPackets([[0x1b, 0x100], [0x04, 0x101]], [0x101, [0xff, 0xfb]])), ['video:h264', 'audio:mp3']);
+  assert.deepStrictEqual(kinds(tsPackets([[0x1b, 0x100], [0x03, 0x101]], [0x101, [0xff, 0xfd]])), ['video:h264', 'audio:mp2']);
+  assert.strictEqual(codecs.tsStreams(tsPackets([[0x03, 0x101]])).streams[0].unsure, true);
+  assert.strictEqual(codecs.tsStreams(Buffer.from('not a stream')).found, false);
+
+  const can = { video: ['h264', 'hevc'], audio: ['aac', 'mp3'] };
+  const plan = (list) => codecs.plan(list.map(([kind, codec]) => ({ kind, codec })), can);
+  assert.strictEqual(plan([['video', 'h264'], ['audio', 'aac']]).convert, false);
+  assert.deepStrictEqual(((p) => [p.convert, p.video, p.audio])(plan([['video', 'hevc'], ['audio', 'eac3']])), [true, 'copy', 'encode']);
+  assert.deepStrictEqual(((p) => [p.video, p.audio, p.why])(plan([['video', 'mpeg2video'], ['audio', 'mp2']])), ['encode', 'encode', 'mpeg2video video and mp2 audio']);
+  // A second, playable audio track is picked (and passed through) instead of converting the first.
+  assert.deepStrictEqual(((p) => [p.convert, p.audio, p.audioTrack])(plan([['video', 'h264'], ['audio', 'ac3'], ['audio', 'aac']])), [true, 'copy', 1]);
+  assert.deepStrictEqual(((p) => [p.convert, p.video, p.audio])(plan([['audio', 'mp2']])), [true, 'none', 'encode']);
+
+  assert.deepStrictEqual(codecs.hlsStreams('#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028,ec-3"\nv.m3u8').map((x) => x.codec), ['h264', 'eac3']);
+});
+
+test('convert: ffmpeg input options per kind of address', () => {
+  const http = inputArgs('http://h/x', { userAgent: 'UA/1', referrer: 'http://r/' });
+  assert.ok(http.includes('-reconnect') && http[http.indexOf('-user_agent') + 1] === 'UA/1' && http[http.indexOf('-referer') + 1] === 'http://r/');
+  assert.ok(inputArgs('rtsp://cam/1').includes('-rtsp_transport'));
+  assert.ok(inputArgs('udp://239.0.0.1:1234').includes('-overrun_nonfatal'));
+  assert.strictEqual(inputArgs('http://h/x', null, { loglevel: 'info' })[inputArgs('http://h/x').indexOf('-loglevel') + 1], 'info');
+  const listed = parseStreams([
+    'Input #0, mpegts, from \'x\':',
+    '  Program 1',
+    '  Stream #0:0[0x100]: Video: h264 (High) ([27][0][0][0] / 0x001B), yuv420p, 1920x1080',
+    '  Stream #0:1[0x101](eng): Audio: ac3 (AC-3 / 0x332D4341), 48000 Hz, stereo',
+    '  Program 2',
+    '  Stream #0:0[0x100]: Video: h264 (High) ([27][0][0][0] / 0x001B), yuv420p, 1920x1080',
+    '  Stream #0:2: Video: mjpeg (Baseline), yuvj420p, 600x600 (attached pic)',
+  ].join('\n'));
+  assert.deepStrictEqual(listed.map((x) => `${x.kind}:${x.codec}`), ['video:h264', 'audio:ac3']);
+  assert.strictEqual(inputArgs('http://h/x').slice(-2).join(' '), '-i http://h/x');
+  assert.strictEqual(cleanError('[http @ 0x1] HTTP error 403 Forbidden'), 'The server refused the stream (403)');
+});
+
+(async () => {
+  let failed = 0;
+  for (const [name, fn] of tests) {
+    try {
+      await fn();
+      console.log('ok   ' + name);
+    } catch (e) {
+      failed++;
+      console.log('FAIL ' + name + '\n     ' + String(e.stack || e).split('\n').slice(0, 4).join('\n     '));
+    }
+  }
+  console.log(failed ? `\n${failed} of ${tests.length} failed` : `\nAll ${tests.length} checks passed`);
+  process.exit(failed ? 1 : 0);
+})();

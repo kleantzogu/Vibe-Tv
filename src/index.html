@@ -1,0 +1,256 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src * data: blob:; media-src * blob: data:; connect-src *; worker-src 'self' blob:">
+  <meta name="color-scheme" content="light dark">
+  <title>Vibe TV</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<div id="app" class="app" hidden>
+
+  <!-- ─────────── Sidebar: playlist, search, filters, channels ─────────── -->
+  <aside class="sidebar" aria-label="Channels">
+    <header class="side-top drag">
+      <button id="btnPlaylist" class="pl-switch" title="Switch playlist" aria-haspopup="menu">
+        <span id="plName" class="pl-name"></span>
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 6.5l3 3 3-3"/></svg>
+      </button>
+      <button id="btnSidebar" class="icon-btn" aria-label="Hide sidebar">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="2" y="3" width="12" height="10" rx="2"/><path d="M6.5 3v10"/></svg>
+      </button>
+      <button id="btnImport" class="icon-btn" title="Import an M3U playlist" aria-label="Import an M3U playlist">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10"/></svg>
+      </button>
+      <button id="btnMore" class="icon-btn" title="More: hide offline channels, check channels" aria-label="More options" aria-haspopup="menu">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="3.5" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="8" cy="8" r="1.1" fill="currentColor" stroke="none"/><circle cx="12.5" cy="8" r="1.1" fill="currentColor" stroke="none"/></svg>
+      </button>
+    </header>
+
+    <div class="side-tools">
+      <div class="filters-wrap">
+        <div id="filters" class="filters" role="tablist" aria-label="Filter channels"></div>
+        <button id="btnGroups" class="chip chip-group" title="Choose a group" aria-haspopup="dialog" aria-expanded="false">
+          <span id="groupLabel">Groups</span>
+          <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M5 6.5l3 3 3-3"/></svg>
+        </button>
+      </div>
+
+      <label class="search">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+        <input id="search" type="search" placeholder="Search channels" autocomplete="off" spellcheck="false" aria-label="Search channels">
+      </label>
+
+      <div id="checkBar" class="check-bar" hidden>
+        <div class="check-track"><div id="checkFill" class="check-fill"></div></div>
+        <span id="checkText" class="check-text"></span>
+        <button id="btnStopCheck" class="text-btn">Stop</button>
+      </div>
+    </div>
+
+    <div class="list-wrap">
+      <div id="list" class="list" tabindex="0" role="listbox" aria-label="Channel list">
+        <div id="listSpacer" class="list-spacer"></div>
+      </div>
+      <div id="listEmpty" class="list-empty" hidden></div>
+    </div>
+
+    <div id="groupPop" class="group-pop" role="dialog" aria-label="Groups" hidden>
+      <label class="search search-sm">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+        <input id="groupSearch" type="search" placeholder="Find a group" autocomplete="off" spellcheck="false" aria-label="Find a group">
+      </label>
+      <ul id="groupList" class="group-list"></ul>
+      <div class="group-foot">
+        <span id="groupHiddenNote" class="group-hidden-note"></span>
+        <button id="btnManageGroups" class="text-btn">Manage groups…</button>
+      </div>
+    </div>
+  </aside>
+
+  <!-- In auto-hide mode, touching the left edge of the window brings the sidebar back. -->
+  <div id="edgeZone" class="edge-zone" aria-hidden="true"></div>
+
+  <!-- ─────────── Player ─────────── -->
+  <main class="stage">
+    <div id="player" class="player idle">
+      <video id="video" playsinline></video>
+      <div class="drag drag-strip" aria-hidden="true"></div>
+      <button id="btnShowSidebar" class="ctl sb-reveal" aria-label="Show sidebar">
+        <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="2.2"/><path d="M8 4v12"/></svg>
+      </button>
+
+      <div id="osd" class="osd" aria-hidden="true"></div>
+
+      <div id="overlay" class="overlay">
+        <div id="overlayIdle" class="overlay-box">
+          <svg class="overlay-glyph" viewBox="0 0 48 48" aria-hidden="true"><rect x="5" y="10" width="38" height="25" rx="3"/><path d="M17 41h14M20 17.5v10l9-5z"/></svg>
+          <p>Pick a channel to start watching</p>
+        </div>
+        <div id="overlayLoading" class="overlay-box" hidden>
+          <div class="spinner" role="status" aria-label="Loading"></div>
+        </div>
+        <div id="overlayError" class="overlay-box" hidden>
+          <p id="errorTitle" class="error-title"></p>
+          <p id="errorDetail" class="error-detail"></p>
+          <div class="overlay-actions">
+            <button id="btnRetry" class="btn on-dark">Try again</button>
+            <button id="btnCopyUrl" class="btn on-dark quiet">Copy stream address</button>
+          </div>
+        </div>
+      </div>
+
+      <div id="controls" class="controls">
+        <div class="now-row">
+          <div id="nowLogo" class="logo logo-sm"></div>
+          <div class="now-text">
+            <div id="nowName" class="now-name"></div>
+            <div id="nowMeta" class="now-meta"></div>
+          </div>
+          <button id="btnFav" class="ctl fav-btn" title="Add to favorites" aria-label="Favorite">
+            <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.8l2.2 4.6 5 .7-3.6 3.5.9 5-4.5-2.4-4.5 2.4.9-5L2.8 8.1l5-.7z"/></svg>
+          </button>
+        </div>
+        <div class="seek-row">
+          <input id="seek" class="seek" type="range" min="0" max="1" step="0.1" value="0" aria-label="Position">
+          <span id="timeLabel" class="time-label"></span>
+        </div>
+        <div class="ctl-row">
+        <button id="btnPlay" class="ctl" title="Play / Pause (Space)" aria-label="Play or pause">
+          <svg class="i-play" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4l10 6-10 6z" fill="currentColor" stroke="none"/></svg>
+          <svg class="i-pause" viewBox="0 0 20 20" aria-hidden="true"><path d="M6 4h3v12H6zM11 4h3v12h-3z" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="btnPrev" class="ctl" title="Previous channel (Page Up)" aria-label="Previous channel">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 14l5-5 5 5"/></svg>
+        </button>
+        <button id="btnNext" class="ctl" title="Next channel (Page Down)" aria-label="Next channel">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 7l5 5 5-5"/></svg>
+        </button>
+        <button id="btnMute" class="ctl" title="Mute (M)" aria-label="Mute">
+          <svg class="i-vol" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3.5v-11L6 8z" fill="currentColor" stroke="none"/><path d="M13 7.5a3.5 3.5 0 0 1 0 5M15 5a7 7 0 0 1 0 10"/></svg>
+          <svg class="i-muted" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 8v4h3l4 3.5v-11L6 8z" fill="currentColor" stroke="none"/><path d="M13 7.5l4 5M17 7.5l-4 5"/></svg>
+        </button>
+        <input id="volume" class="volume" type="range" min="0" max="1" step="0.02" value="1" aria-label="Volume">
+        <span id="liveInfo" class="live-info"></span>
+        <span class="ctl-spacer"></span>
+        <button id="btnPip" class="ctl" title="Picture in picture" aria-label="Picture in picture">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="4" width="15" height="12" rx="1.5"/><rect x="10" y="10" width="5.5" height="4" rx=".5" fill="currentColor" stroke="none"/></svg>
+        </button>
+        <button id="btnFull" class="ctl" title="Full screen (F)" aria-label="Full screen">
+          <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3.5 7.5v-4h4M16.5 7.5v-4h-4M3.5 12.5v4h4M16.5 12.5v4h-4"/></svg>
+        </button>
+        </div>
+      </div>
+    </div>
+
+  </main>
+</div>
+
+<!-- ─────────── First run ─────────── -->
+<div id="welcome" class="welcome" hidden>
+  <div class="drag drag-strip" aria-hidden="true"></div>
+  <div class="welcome-box">
+    <img class="welcome-logo" src="icon.png" alt="" width="112" height="112" draggable="false">
+    <h1>Make a playlist to start watching</h1>
+    <p>Import an .m3u or .m3u8 file, paste the web address of one, or log in with the Xtream Codes details your provider gave you. Its channels are added to a playlist in the app, and you can import more files into it later. You can also drop a file anywhere in this window.</p>
+    <div class="welcome-actions">
+      <button id="btnWelcomeFile" class="btn primary">Import M3U file…</button>
+      <button id="btnWelcomeUrl" class="btn">Import from URL…</button>
+      <button id="btnWelcomeXtream" class="btn">Xtream Codes login…</button>
+    </div>
+  </div>
+</div>
+
+<div id="dropHint" class="drop-hint" hidden><div id="dropText">Drop the playlist to import it</div></div>
+
+<!-- ─────────── Dialogs ─────────── -->
+<dialog id="dlgUrl" class="dialog">
+  <form method="dialog" id="formUrl">
+    <h2 id="urlTitle">Import from URL</h2>
+    <label class="field">
+      <span>Playlist address</span>
+      <input id="urlInput" type="url" placeholder="https://example.com/playlist.m3u" required spellcheck="false">
+    </label>
+    <p class="form-hint">The channels are downloaded once and added to the playlist.</p>
+    <p id="urlError" class="form-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button id="urlSubmit" type="submit" class="btn primary">Import</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgXtream" class="dialog">
+  <form method="dialog" id="formXtream">
+    <h2>Log in with Xtream Codes</h2>
+    <label class="field">
+      <span>Server</span>
+      <input id="xtServer" type="text" placeholder="http://example.com:8080" required spellcheck="false" autocomplete="off">
+    </label>
+    <div class="field-row">
+      <label class="field">
+        <span>Username</span>
+        <input id="xtUser" type="text" required spellcheck="false" autocomplete="off">
+      </label>
+      <label class="field">
+        <span>Password</span>
+        <input id="xtPass" type="password" required autocomplete="off">
+      </label>
+    </div>
+    <label class="field">
+      <span>Playlist name <em>(optional)</em></span>
+      <input id="xtName" type="text" maxlength="80" placeholder="Named after the server">
+    </label>
+    <label class="check">
+      <input id="xtMovies" type="checkbox">
+      <span>Include movies</span>
+    </label>
+    <p class="form-hint">You can also paste a full get.php address into Server. The login is kept with the playlist so you can refresh its channels later.</p>
+    <p id="xtError" class="form-error" hidden></p>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button id="xtSubmit" type="submit" class="btn primary">Log In</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgGroups" class="dialog dialog-groups" aria-labelledby="gmTitle">
+  <header class="gm-head">
+    <div class="gm-title">
+      <h2 id="gmTitle">Groups</h2>
+      <p id="gmSummary" class="gm-summary"></p>
+    </div>
+    <button type="button" class="btn primary" data-close>Done</button>
+  </header>
+  <label class="search search-sm gm-search">
+    <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.5"/><path d="M10.5 10.5 14 14"/></svg>
+    <input id="gmSearch" type="search" placeholder="Find a group" autocomplete="off" spellcheck="false" aria-label="Find a group">
+  </label>
+  <div id="gmBulk" class="gm-bulk"></div>
+  <div id="gmList" class="gm-list"></div>
+  <p class="gm-foot">Hidden groups stay out of All, search, the group list and channel checks. Favorites and Recent still show their channels. Changes apply right away.</p>
+</dialog>
+
+<dialog id="dlgName" class="dialog">
+  <form method="dialog" id="formName">
+    <h2 id="nameTitle">New playlist</h2>
+    <label class="field">
+      <span>Name</span>
+      <input id="nameInput" type="text" required maxlength="80" placeholder="My channels">
+    </label>
+    <div class="dialog-actions">
+      <button type="button" class="btn" data-close>Cancel</button>
+      <button id="nameSubmit" type="submit" class="btn primary">Create</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+
+<script src="vendor/hls.min.js"></script>
+<script src="m3u.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
