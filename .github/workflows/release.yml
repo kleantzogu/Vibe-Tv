@@ -80,7 +80,7 @@ jobs:
         shell: bash
         run: |
           shopt -s nullglob
-          files=(dist/*.exe dist/*.exe.blockmap dist/*.AppImage dist/latest.yml dist/latest-linux.yml)
+          files=(dist/*.exe dist/*.exe.blockmap dist/*.AppImage dist/latest*.yml)
           [ ${#files[@]} -gt 0 ] || { echo "Nothing to publish"; exit 1; }
           gh release upload "$TAG" --clobber "${files[@]}"
 
