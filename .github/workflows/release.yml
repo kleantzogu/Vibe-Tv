@@ -14,6 +14,10 @@ on:
       tag:
         description: Tag to build, for example v1.1.0
         required: true
+      ref:
+        description: Commit or branch to build instead of the tag (only for fixes outside the app)
+        required: false
+        default: ''
       publish:
         description: Add the installers to that GitHub release
         type: boolean
@@ -37,7 +41,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22

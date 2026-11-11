@@ -14,13 +14,15 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 
 const root = path.join(__dirname, '..');
-const read = (p) => fs.readFileSync(path.join(root, p), 'utf8');
+// Line endings are normalised: Git on Windows checks text files out with CRLF.
+const lf = (s) => s.replace(/\r\n?/g, '\n');
+const read = (p) => lf(fs.readFileSync(path.join(root, p), 'utf8'));
 const exists = (p) => fs.existsSync(path.join(root, p));
 
 function licenseText(dir) {
   const full = path.join(root, dir);
   const file = fs.readdirSync(full).find((f) => /^(licen[cs]e|copying)(\.(md|txt))?$/i.test(f));
-  return file ? fs.readFileSync(path.join(full, file), 'utf8').trim() : '';
+  return file ? lf(fs.readFileSync(path.join(full, file), 'utf8')).trim() : '';
 }
 
 const repoUrl = (pkg) => {
@@ -184,7 +186,7 @@ function build() {
 const file = path.join(root, 'src', 'credits.json');
 const json = JSON.stringify(build(), null, 1) + '\n';
 if (process.argv.includes('--check')) {
-  if (!fs.existsSync(file) || fs.readFileSync(file, 'utf8') !== json) {
+  if (!fs.existsSync(file) || lf(fs.readFileSync(file, 'utf8')) !== json) {
     console.error('src/credits.json is out of date: run `npm run credits` and commit it.');
     process.exit(1);
   }
