@@ -54,6 +54,13 @@ if (!token) {
   }
 }
 
+// Make the release first, so the uploads (one per installer, sent at the same time) all find it.
+const hasRelease = spawnSync('gh', ['release', 'view', tag, '-R', 'kleantzogu/Vibe-Tv'], { cwd: root, stdio: 'ignore', env: { ...process.env, GH_TOKEN: token } }).status === 0;
+if (!hasRelease) {
+  run('gh', ['release', 'create', tag, '-R', 'kleantzogu/Vibe-Tv', '--verify-tag', '--title', `Vibe TV ${pkg.version}`, '--notes', `Vibe TV ${pkg.version}`], { env: { ...process.env, GH_TOKEN: token } });
+  console.log(`Created release ${tag}.\n`);
+}
+
 const build = spawnSync('npx', ['electron-builder', '--publish', 'always'], {
   cwd: root,
   stdio: 'inherit',
