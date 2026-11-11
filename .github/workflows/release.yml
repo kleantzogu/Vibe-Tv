@@ -1,0 +1,69 @@
+# Builds the Windows and Linux installers for a release and adds them to it, together with the files
+# installed copies read to update themselves (latest.yml, latest-linux.yml). The macOS installer is
+# built and signed on a Mac with `npm run release`, which pushes the version tag that starts this.
+#
+# Run it by hand (Actions ▸ Release ▸ Run workflow) to build an existing tag; leave "publish" off to
+# only build and download the installers from the run's artifacts.
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Tag to build, for example v1.1.0
+        required: true
+      publish:
+        description: Add the installers to that GitHub release
+        type: boolean
+        default: false
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm test
+
+      - name: Make sure the release exists
+        if: env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "Vibe TV ${TAG#v}" --notes "Vibe TV ${TAG#v}" ||
+            gh release view "$TAG" >/dev/null
+
+      - name: Build${{ (github.event_name == 'push' || inputs.publish) && ' and publish' || '' }}
+        shell: bash
+        run: npx electron-builder --publish "$([ "$PUBLISH" = true ] && echo always || echo never)"
+
+      - name: Keep the installers with this run
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-tv-${{ env.TAG }}-${{ runner.os }}
+          path: |
+            dist/*.exe
+            dist/*.AppImage
+            dist/latest*.yml
+          if-no-files-found: error
+          retention-days: 14

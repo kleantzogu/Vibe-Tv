@@ -1,0 +1,44 @@
+name: Bug report
+description: Something doesn't work as it should
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks for reporting! Please **don't paste stream addresses or Xtream logins**: they contain your username and password."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What did you do, what did you expect, and what happened instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How can we reproduce it?
+      placeholder: "1. Import a playlist…\n2. Play a channel…\n3. …"
+  - type: input
+    id: version
+    attributes:
+      label: Vibe TV version
+      description: App menu ▸ About Vibe TV
+      placeholder: "1.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: System
+      options: [macOS (Apple Silicon), macOS (Intel), Windows, Linux]
+    validations:
+      required: true
+  - type: input
+    id: stream
+    attributes:
+      label: Kind of stream (if it's about playback)
+      placeholder: "HLS (.m3u8), MPEG-TS, Xtream, MP4… and what the player shows (e.g. 'Audio converted')"
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: Screenshots, error messages, what you've tried.

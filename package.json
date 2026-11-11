@@ -3,8 +3,28 @@
   "productName": "Vibe TV",
   "version": "1.1.0",
   "description": "Vibe TV: a clean desktop player for M3U / IPTV playlists",
+  "keywords": [
+    "iptv",
+    "m3u",
+    "m3u8",
+    "iptv-player",
+    "video-player",
+    "hls",
+    "mpeg-ts",
+    "xtream-codes",
+    "electron",
+    "desktop-app"
+  ],
   "main": "main.js",
-  "author": "Vibe TV",
+  "author": "The Vibe TV contributors",
+  "homepage": "https://github.com/kleantzogu/Vibe-Tv#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kleantzogu/Vibe-Tv.git"
+  },
+  "bugs": {
+    "url": "https://github.com/kleantzogu/Vibe-Tv/issues"
+  },
   "license": "MIT",
   "private": true,
   "scripts": {

@@ -4,7 +4,13 @@
 
 <h1 align="center">Vibe TV</h1>
 
-<p align="center">A clean, fast desktop player for M3U / IPTV playlists, for macOS, Windows and Linux.</p>
+<p align="center">A clean, fast, open-source desktop player for M3U / IPTV playlists, for macOS, Windows and Linux.</p>
+
+<p align="center">
+  <a href="https://github.com/kleantzogu/Vibe-Tv/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kleantzogu/Vibe-Tv?label=download"></a>
+  <a href="https://github.com/kleantzogu/Vibe-Tv/actions/workflows/ci.yml"><img alt="Tests" src="https://github.com/kleantzogu/Vibe-Tv/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/github/license/kleantzogu/Vibe-Tv"></a>
+</p>
 
 ---
 
@@ -23,6 +29,14 @@
 - **Channel checks.** Find out which channels are offline, and hide them.
 - **Logos and categories** from the playlist, or from the public iptv-org database.
 - Custom `Referer` / `User-Agent` per channel (`#EXTVLCOPT`, Kodi-style `|User-Agent=`).
+
+## Open source
+
+Vibe TV is free and open source under the [MIT License](LICENSE): anyone can download it, use it,
+change it, share it, build on it or ship their own version, for any purpose. The only condition is
+keeping the license notice. Ideas, bug reports and pull requests are welcome: see
+[CONTRIBUTING.md](CONTRIBUTING.md). Please report security problems privately, as described in
+[SECURITY.md](SECURITY.md).
 
 ## Install
 
@@ -81,11 +95,12 @@ signed, so macOS Gatekeeper and Windows SmartScreen show a warning the first tim
 Installed copies check GitHub Releases when they start and every six hours. To ship a new version:
 
 1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`), commit and push.
-2. Run `npm run release`. It checks that the tests pass and that everything is pushed, builds the
-   installer for this computer, and publishes it as release `v1.2.0` on GitHub together with the files
-   the updater reads (`latest-mac.yml`, and the `.zip` macOS updates from). It uses your `gh` login (or
-   `GH_TOKEN`). Run it on each system you release for; each adds its files to the same release.
-3. Edit the release on GitHub to add notes; the app shows them under "What's new".
+2. On a Mac, run `npm run release`. It checks that the tests pass and that everything is pushed, tags
+   the commit `v1.2.0`, and publishes the signed macOS installer with the files the updater reads
+   (`latest-mac.yml`, and the `.zip` macOS updates from). It uses your `gh` login (or `GH_TOKEN`).
+3. The tag starts the **Release** workflow on GitHub Actions, which builds the Windows and Linux
+   installers (and their `latest.yml` / `latest-linux.yml`) and adds them to the same release.
+4. Edit the release on GitHub to add notes; the app shows them under "What's new".
 
 People then get the update as chosen in the app menu (Help menu on Windows and Linux) with
 **Install Updates Automatically**: on (the default), it downloads quietly and installs when they quit,
@@ -261,13 +276,21 @@ src/               The window: index.html, styles.css, app.js, m3u.js (playlist 
 src/vendor/        hls.js 1.7.3, mpegts.js 1.8.2, dash.js 5.2.1, with their licenses
 scripts/start.js   `npm start`
 scripts/release.js `npm run release`
+.github/           CI and Release workflows, issue and pull request templates
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)
 ```
 
+## Contributing
+
+Bug reports, ideas and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) explains how to
+build, test and send changes. Every push and pull request is tested on macOS, Windows and Linux. You can
+also publish your own build from a fork: set `owner` and `repo` under `build.publish` in
+`package.json`, and your users get updates from your releases.
+
 ## License
 
-Vibe TV is released under the [MIT License](LICENSE).
+Vibe TV is free software under the [MIT License](LICENSE).
 
 It includes [hls.js](https://github.com/video-dev/hls.js) (Apache 2.0),
 [mpegts.js](https://github.com/xqq/mpegts.js) (Apache 2.0) and

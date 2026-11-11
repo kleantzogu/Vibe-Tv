@@ -35,7 +35,9 @@ let channelDb = null;
 let library = null;
 let converter = null;
 let updates = null;
-const RELEASES = 'https://github.com/kleantzogu/Vibe-Tv/releases';
+// Where releases live: the GitHub repository in package.json's publish settings (a fork publishes to its own).
+const { owner: GH_OWNER, repo: GH_REPO } = require('./package.json').build.publish[0];
+const RELEASES = `https://github.com/${GH_OWNER}/${GH_REPO}/releases`;
 // Codecs the window decodes itself in an MPEG-TS stream, reported by the window when it starts.
 let canPlayTs = { video: ['h264'], audio: ['aac', 'mp3'] };
 let activeHeaders = null; // { referrer, userAgent } for the channel that is playing

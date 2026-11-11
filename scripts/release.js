@@ -6,14 +6,16 @@
  *
  * Before building it checks that the tests pass and that every change is committed and pushed, so a
  * release always matches the code on GitHub. Bump "version" in package.json first.
- * Run it once on each system you release for (macOS, Windows, Linux); each adds its files to the
- * same release.
+ * Run it on a Mac: pushing the tag also starts the Release workflow on GitHub, which builds the
+ * Windows and Linux installers and adds them to the same release.
  */
 const { execFileSync, spawnSync } = require('child_process');
 const path = require('path');
 
 const root = path.join(__dirname, '..');
 const pkg = require(path.join(root, 'package.json'));
+const { owner, repo } = pkg.build.publish[0]; // publish to the repository in package.json (a fork: its own)
+const slug = `${owner}/${repo}`;
 const run = (cmd, args, opts = {}) => execFileSync(cmd, args, { cwd: root, encoding: 'utf8', ...opts }).trim();
 const fail = (msg) => {
   console.error(`\n✗ ${msg}\n`);
@@ -55,10 +57,15 @@ if (!token) {
 }
 
 // Make the release first, so the uploads (one per installer, sent at the same time) all find it.
-const hasRelease = spawnSync('gh', ['release', 'view', tag, '-R', 'kleantzogu/Vibe-Tv'], { cwd: root, stdio: 'ignore', env: { ...process.env, GH_TOKEN: token } }).status === 0;
+const hasRelease = spawnSync('gh', ['release', 'view', tag, '-R', slug], { cwd: root, stdio: 'ignore', env: { ...process.env, GH_TOKEN: token } }).status === 0;
 if (!hasRelease) {
-  run('gh', ['release', 'create', tag, '-R', 'kleantzogu/Vibe-Tv', '--verify-tag', '--title', `Vibe TV ${pkg.version}`, '--notes', `Vibe TV ${pkg.version}`], { env: { ...process.env, GH_TOKEN: token } });
-  console.log(`Created release ${tag}.\n`);
+  try {
+    run('gh', ['release', 'create', tag, '-R', slug, '--verify-tag', '--title', `Vibe TV ${pkg.version}`, '--notes', `Vibe TV ${pkg.version}`], { env: { ...process.env, GH_TOKEN: token } });
+    console.log(`Created release ${tag}.\n`);
+  } catch (e) {
+    // The Release workflow (started by the tag) may have made it a moment earlier: that's fine.
+    if (spawnSync('gh', ['release', 'view', tag, '-R', slug], { stdio: 'ignore', env: { ...process.env, GH_TOKEN: token } }).status !== 0) throw e;
+  }
 }
 
 const build = spawnSync('npx', ['electron-builder', '--publish', 'always'], {
@@ -68,5 +75,5 @@ const build = spawnSync('npx', ['electron-builder', '--publish', 'always'], {
 });
 if (build.status !== 0) fail('The build or upload failed (see above).');
 
-console.log(`\n✓ Published: https://github.com/kleantzogu/Vibe-Tv/releases/tag/v${pkg.version}`);
+console.log(`\n✓ Published: https://github.com/${slug}/releases/tag/v${pkg.version}`);
 console.log('  Add release notes there; installed copies show them under "What’s new".\n');
