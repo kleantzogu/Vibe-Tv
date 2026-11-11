@@ -1,0 +1,9 @@
+/*
+ * Android-only styles, loaded after styles.css (scripts/build-android-web.js adds it to www/).
+ * The page gets a class from the platform it runs on: .platform-android on a phone or tablet,
+ * .platform-androidtv on a TV. The phone and TV layouts go here, so styles.css stays the desktop's.
+ */
+
+/* The first screen: its three buttons don't fit side by side on a phone. */
+.welcome { padding: 24px; }
+.welcome-actions { flex-wrap: wrap; justify-content: center; }
