@@ -28,10 +28,22 @@ const branch = run('git', ['rev-parse', '--abbrev-ref', 'HEAD']);
 if (run('git', ['rev-parse', 'HEAD']) !== run('git', ['rev-parse', `origin/${branch}`])) {
   fail(`This branch isn't the same as origin/${branch}. Push (or pull) first.`);
 }
-const tags = run('git', ['ls-remote', '--tags', 'origin', `v${pkg.version}`]);
-if (tags) console.log(`Note: v${pkg.version} already exists on GitHub; this system's files are added to it.\n`);
-
 if (spawnSync('npm', ['test'], { cwd: root, stdio: 'inherit' }).status !== 0) fail('The tests failed.');
+
+// GitHub only publishes a release for a tag that exists, so tag this commit vX.Y.Z (once).
+const tag = `v${pkg.version}`;
+const remoteTag = run('git', ['ls-remote', '--tags', 'origin', tag]);
+if (remoteTag) {
+  const tagged = remoteTag.split(/\s+/)[0];
+  const head = run('git', ['rev-parse', 'HEAD']);
+  const peeled = run('git', ['ls-remote', 'origin', `${tag}^{}`]).split(/\s+/)[0] || tagged;
+  if (peeled !== head) fail(`${tag} already exists on GitHub for another commit. Raise the version in package.json.`);
+  console.log(`${tag} already exists for this commit; this system's files are added to its release.\n`);
+} else {
+  run('git', ['tag', tag]);
+  run('git', ['push', 'origin', tag]);
+  console.log(`Tagged this commit ${tag}.\n`);
+}
 
 let token = process.env.GH_TOKEN || process.env.GITHUB_TOKEN || '';
 if (!token) {
