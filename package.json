@@ -43,7 +43,8 @@
         "dmg",
         "zip"
       ],
-      "icon": "build/icon.icns"
+      "icon": "build/icon.icns",
+      "artifactName": "Vibe-TV-${version}-${arch}-mac.${ext}"
     },
     "win": {
       "target": [
@@ -56,7 +57,8 @@
       "target": [
         "AppImage"
       ],
-      "icon": "build/icon.png"
+      "icon": "build/icon.png",
+      "artifactName": "Vibe-TV-${version}-${arch}.${ext}"
     },
     "asarUnpack": [
       "node_modules/ffmpeg-static/**"
@@ -68,7 +70,13 @@
         "repo": "Vibe-Tv",
         "releaseType": "release"
       }
-    ]
+    ],
+    "dmg": {
+      "artifactName": "Vibe-TV-${version}-${arch}.${ext}"
+    },
+    "nsis": {
+      "artifactName": "Vibe-TV-Setup-${version}.${ext}"
+    }
   },
   "dependencies": {
     "electron-updater": "6.8.11",
