@@ -13,6 +13,7 @@ const { decodeText } = require('../../lib/imports');
 const { installNativePlayer } = require('./player');
 const { createMenu } = require('./menu');
 const { installTouch } = require('./touch');
+const { installTvFocus } = require('./tv-focus');
 
 // The app's own plugins: android/app/src/main/java/com/vibetv/app/
 const VibeDevice = registerPlugin('VibeDevice');
@@ -41,7 +42,12 @@ const menu = createMenu(document);
 const opened = new Map(); // token -> { name, data (base64) }
 const bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
-const { api, flush, emit, whenStarted } = createApi({
+// The playlist the app starts with on Android (phone and TV), so there is something to watch right
+// away: free-to-air and free online channels from around the world, kept by the Free-TV project.
+const DEFAULT_PLAYLIST = { name: 'Free TV', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8' };
+
+const { api, flush, emit, whenStarted, pendingDefault } = createApi({
+  defaultPlaylist: DEFAULT_PLAYLIST,
   openBackend: () =>
     createBackend({
       storage: nativeStorage(VibeFiles),
@@ -83,6 +89,19 @@ const nativePlayer = installNativePlayer({ plugin: VibePlayer, document, isTv: (
 window.vibeNativePlayer = nativePlayer;
 installTouch({ video: nativePlayer.element, playerEl: document.getElementById('player') });
 
+// A TV remote: arrows move the focus, OK presses (tv-focus.js).
+const tvFocus = installTvFocus({ document, isTv: () => tv, player: nativePlayer, menu, promptText: (opts) => VibeDevice.prompt(opts) });
+
+VibeDevice.addListener('key', (e) => tvFocus.remoteKey(e.key)); // on a phone too: headset and keyboard play keys
+
+// First start: bring in the starting playlist, the way an opened file is imported (with the same
+// messages). On a TV the focus then starts on the channels.
+whenStarted.then(() => {
+  const first = pendingDefault();
+  if (first) emit('files:opened', [first]);
+  setTimeout(() => tvFocus.start(), 300);
+});
+
 // "Open with Vibe TV" on a playlist file: the app imports it, as when a file is opened on a computer.
 let openedCount = 0;
 VibeDevice.addListener('opened', (file) => {
@@ -95,6 +114,7 @@ VibeDevice.addListener('opened', (file) => {
 // leaves the app when nothing is.
 VibeDevice.addListener('back', () => {
   if (menu.close()) return;
+  if (tvFocus.handleBack()) return;
   const dialog = [...document.querySelectorAll('dialog[open]')].pop();
   if (dialog) {
     if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();

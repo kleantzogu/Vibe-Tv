@@ -25,7 +25,7 @@ html.native-player, .native-player body { background: transparent; }
 /* Full screen: the player covers the page (the system bars are hidden by the app). */
 .native-full .player { position: fixed; inset: 0; z-index: 40; width: 100vw; height: 100vh; }
 /* The player is see-through, so what it covers has to go, or it would show through the picture. */
-.native-full .app > :not(.stage) { visibility: hidden; }
+.native-full .app > :not(.stage) { display: none !important; }
 
 /* The picture-in-picture button is the page's own; the native player has none (yet). */
 .native-player #btnPip { display: none; }
@@ -104,3 +104,48 @@ html.native-player, .native-player body { background: transparent; }
 @media (orientation: landscape) {
   .platform-android .sidebar { width: clamp(240px, 38vw, 360px); }
 }
+
+/*
+ * Android TV (.platform-androidtv): watched from the sofa and worked with a remote
+ * (platform/android/tv-focus.js). Larger type, a margin for screens that cut off their edges, a
+ * focus that can't be missed, and nothing that needs a pointer.
+ */
+.platform-androidtv body { font-size: 15px; }
+.platform-androidtv .app { padding: 3vh 3vw; }
+.platform-androidtv.native-full .app { padding: 0; }
+.platform-androidtv .welcome { padding: 6vh 6vw; }
+.platform-androidtv .drag-strip, .platform-androidtv .sb-resize, .platform-androidtv #volume, .platform-androidtv #btnSidebar,
+.platform-androidtv .player > .sb-reveal, .platform-androidtv .edge-zone, .platform-androidtv #btnWelcomeFile { display: none !important; }
+.platform-androidtv .sidebar { width: clamp(300px, 36vw, 400px); border-right: 0; border-radius: 14px; overflow: hidden; }
+.platform-androidtv .pl-switch { height: 40px; font-size: 17px; }
+.platform-androidtv .icon-btn { width: 40px; height: 40px; }
+.platform-androidtv .icon-btn svg { width: 19px; height: 19px; }
+.platform-androidtv .chip { height: 32px; padding: 0 14px; border-radius: 16px; font-size: 14px; }
+.platform-androidtv .search { height: 40px; }
+.platform-androidtv .search input { font-size: 16px; }
+.platform-androidtv .row-name { font-size: 16px; }
+.platform-androidtv .row-sub { font-size: 13px; }
+.platform-androidtv .star { visibility: visible; }
+.platform-androidtv .now-name { font-size: 20px; }
+.platform-androidtv .now-meta, .platform-androidtv .live-info, .platform-androidtv .time-label { font-size: 15px; }
+.platform-androidtv .ctl { width: 52px; height: 52px; border-radius: 12px; }
+.platform-androidtv .ctl svg { width: 28px; height: 28px; }
+.platform-androidtv .controls { padding: 60px 4vw 4vh; }
+.platform-androidtv .osd { top: 4vh; left: 4vw; font-size: 22px; }
+.platform-androidtv .btn { height: 44px; padding: 0 22px; font-size: 16px; }
+.platform-androidtv .dialog h2 { font-size: 20px; }
+.platform-androidtv .field > span, .platform-androidtv .check { font-size: 15px; }
+.platform-androidtv .field input { height: 46px; font-size: 17px; }
+.platform-androidtv .overlay-box p { font-size: 17px; }
+.platform-androidtv .toast { bottom: 5vh; font-size: 16px; }
+.platform-androidtv .sheet-back { align-items: center; }
+.platform-androidtv .sheet { border-radius: 16px; }
+
+/* The focus: where the remote is. */
+.platform-androidtv :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+.platform-androidtv .ctl:focus-visible, .platform-androidtv .btn.on-dark:focus-visible { outline-color: #fff; background: rgba(255, 255, 255, 0.24); }
+.platform-androidtv .search:focus-within { outline: 3px solid var(--accent); outline-offset: 2px; }
+.platform-androidtv .search input:focus-visible { outline: none; }
+.platform-androidtv .list:focus-visible { outline: none; }
+.platform-androidtv .list:focus .row.cursor { box-shadow: inset 0 0 0 3px var(--accent); background: var(--hover); }
+.platform-androidtv .list:focus .row.cursor.playing { box-shadow: inset 0 0 0 3px #fff; background: var(--accent); }

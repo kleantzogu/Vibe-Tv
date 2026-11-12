@@ -71,6 +71,54 @@ class VibeDevicePlugin : Plugin() {
         takeFile(intent)
     }
 
+    /** A key of the remote that the page is not told about itself (MainActivity.dispatchKeyEvent). */
+    fun remoteKey(name: String) {
+        notifyListeners("key", JSObject().put("key", name))
+    }
+
+    /**
+     * Asks for a line of text in a dialog of the system's own. On a TV this is how text is typed:
+     * a text field inside the page would take every key of the remote for itself.
+     * prompt({ title, value, password, hint }) -> { value } or { cancelled: true }
+     */
+    @PluginMethod
+    fun prompt(call: PluginCall) {
+        val password = call.getBoolean("password") ?: false
+        activity.runOnUiThread {
+            val field = android.widget.EditText(activity)
+            field.setSingleLine(true)
+            field.inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                (if (password) android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD else android.text.InputType.TYPE_TEXT_VARIATION_URI or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS)
+            field.imeOptions = android.view.inputmethod.EditorInfo.IME_ACTION_DONE
+            field.hint = call.getString("hint") ?: ""
+            field.setText(call.getString("value") ?: "")
+            field.setSelection(field.text.length)
+            val pad = (20 * context.resources.displayMetrics.density).toInt()
+            val box = android.widget.FrameLayout(activity)
+            box.setPadding(pad, pad / 2, pad, 0)
+            box.addView(field)
+            var answered = false
+            val dialog = androidx.appcompat.app.AlertDialog.Builder(activity)
+                .setTitle(call.getString("title") ?: "")
+                .setView(box)
+                .setPositiveButton(android.R.string.ok) { _, _ -> answered = true; call.resolve(JSObject().put("value", field.text.toString())) }
+                .setNegativeButton(android.R.string.cancel, null)
+                .setOnDismissListener { if (!answered) call.resolve(JSObject().put("cancelled", true)) }
+                .create()
+            field.setOnEditorActionListener { _, action, _ ->
+                if (action == android.view.inputmethod.EditorInfo.IME_ACTION_DONE) {
+                    answered = true
+                    call.resolve(JSObject().put("value", field.text.toString()))
+                    dialog.dismiss()
+                    true
+                } else false
+            }
+            dialog.window?.setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE)
+            dialog.show()
+            field.requestFocus()
+        }
+    }
+
     /** Leaves the app the way Back does on its first screen: it goes to the background, still open. */
     @PluginMethod
     fun leave(call: PluginCall) {

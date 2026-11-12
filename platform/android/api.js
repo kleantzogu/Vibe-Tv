@@ -18,11 +18,15 @@ const copy = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
  * @param {function} deps.openBackend  async () => platform/android/backend.js createBackend(...)
  * @param {function} deps.getDevice    async () => { tv:boolean, version:string }
  * @param {function} deps.probeFetch   fetch() for channel checks: reads only the beginning of a stream
+ * @param {{ name:string, url:string }} [deps.defaultPlaylist]  a playlist the app starts with: imported once,
+ *   the first time the app runs with no playlists (and not again if the person deletes it)
  * @param {object} deps.host           what only the page can do:
  *   { confirm, copyText, credits, openExternal, pickFiles: async () => [{ name, read }] | null,
  *     popupMenu: async (items) => id | null, openedFiles: (tokens) => [{ name, read }] }
  */
-function createApi({ openBackend, getDevice, probeFetch, host }) {
+const DEFAULT_PLAYLIST = 'default-playlist'; // stands for the starting playlist among the "files" to import
+
+function createApi({ openBackend, getDevice, probeFetch, host, defaultPlaylist = null }) {
   let backend = null;
   let tv = false;
   let activeCheck = null;
@@ -75,7 +79,9 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
     // On a computer these are paths (dropped on the window, opened from the file manager). Here they
     // are tokens for playlist files another app handed over with "Open with" (see "files:opened").
     importFiles: answer(async (playlistId, tokens) => {
-      const files = host.openedFiles ? host.openedFiles(Array.isArray(tokens) ? tokens : []) : [];
+      tokens = Array.isArray(tokens) ? tokens : [];
+      if (tokens.includes(DEFAULT_PLAYLIST) && defaultPlaylist) return importDefault();
+      const files = host.openedFiles ? host.openedFiles(tokens) : [];
       return files.length ? started().imports.importTexts(playlistId || '', files) : null;
     }),
     importUrl: answer((playlistId, url) => started().imports.importUrl(playlistId || '', url)),
@@ -157,12 +163,30 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
     },
   };
 
+  // The playlist the app starts with: a playlist of its own, named, filled from its address.
+  async function importDefault() {
+    const b = started();
+    const made = b.library.create(defaultPlaylist.name);
+    try {
+      const r = await b.imports.importUrl(made.id, defaultPlaylist.url);
+      b.store.data.settings.defaultPlaylist = defaultPlaylist.url; // done: never added a second time
+      b.store.save();
+      return { ...r, created: true };
+    } catch (e) {
+      await b.library.remove(made.id);
+      throw e;
+    }
+  }
+  /** Whether the starting playlist is still to be imported; if so, the token to import it with. */
+  const pendingDefault = () =>
+    defaultPlaylist && backend && !backend.library.playlists.length && !backend.store.data.settings.defaultPlaylist ? DEFAULT_PLAYLIST : null;
+
   /** Writes what has changed right away: Android may end the app at any moment once it is in the background. */
   const flush = () => {
     if (backend) backend.store.flush();
   };
 
-  return { api, emit, flush, whenStarted };
+  return { api, emit, flush, whenStarted, pendingDefault };
 }
 
 module.exports = { createApi };
