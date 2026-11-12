@@ -1767,6 +1767,7 @@
     convert: ['This channel couldn’t be played', ''],
     'protocol-other': ['This kind of stream address isn’t supported', 'Streams can be played from http://, https://, rtmp://, rtsp://, udp:// and similar addresses.'],
     webpage: ['This address is a web page, not a stream', 'The playlist points at a website for this channel instead of a video stream.'],
+    unsupported: ['This device can’t play this stream', 'Its video or sound is in a format this device has no decoder for.'],
   };
 
   function setOverlay(mode) {
@@ -1838,6 +1839,7 @@
     $('errorTitle').textContent = title;
     let body = text || String(detail || '');
     if (reason === 'convert') body = `${detail || 'ffmpeg could not read this stream'}.`.replace(/\.\.$/, '.');
+    if (reason === 'unsupported' && detail && !/^ERROR_/.test(detail)) body = `This device has no decoder for ${detail}.`;
     if (reason === 'offline' && c && (c.tags || []).some((t) => /geo/i.test(t))) {
       body = 'This channel is marked as geo-blocked, so it may only work from certain countries.';
     }
@@ -1846,7 +1848,7 @@
     setOverlay('error');
     playerEl.classList.add('paused');
     showControls();
-    if (c && !['codec', 'protocol', 'protocol-other'].includes(reason)) {
+    if (c && !['codec', 'protocol', 'protocol-other', 'unsupported'].includes(reason)) {
       setStatus(c.url, 'dead');
       renderRows(); // stays listed even with "Hide offline" on, so the error has context
     }
@@ -1863,6 +1865,15 @@
     renderRows();
     showOsd(c.name);
     showControls();
+
+    // Where the platform has a player of its own (Android), it opens the address itself: any kind
+    // of stream it knows, with the channel's headers. The engines below are for the page's <video>.
+    if (window.vibeNativePlayer) {
+      startTimer = setTimeout(() => { if (!started) fail(token, 'timeout'); }, 30000);
+      engine = window.vibeNativePlayer.start(c, (reason, detail) => fail(token, reason, detail));
+      engineKind = 'platform';
+      return;
+    }
 
     if (!/^https?:\/\//i.test(c.url)) return fail(token, CONVERT_SCHEMES.test(c.url) ? 'protocol' : 'protocol-other');
     try { await api.setStreamHeaders(c.headers || null); } catch (e) { /* plain request */ }
