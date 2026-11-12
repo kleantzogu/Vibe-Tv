@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–3 done · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–4 done · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -256,9 +256,25 @@ Estimates are working days for one developer who knows the codebase. Each phase 
 
 ### Phase 4: Playback v1 with web engines (1–2 days)  ·  branch: `android-p4-web-playback`
 
-- [ ] Play HLS/TS/MP4 through the existing hls.js / mpegts.js / `<video>` paths in the WebView.
-- [ ] Verify mixed content (http streams inside the https WebView origin) and record how many test channels play.
+- [x] Play HLS/TS/MP4 through the existing hls.js / mpegts.js / `<video>` paths in the WebView.
+- [x] Verify mixed content (http streams inside the https WebView origin) and record how many test channels play.
 - **Done when:** you have a pass/fail table for the test playlist set. This is the **gate**: it shows how much the native player must cover.
+
+**Result (2026-11-12, Pixel 7 emulator, Android 14, streams from `test/android/streams.js`):** with the web engines alone, **1 of 14 playable streams plays**.
+
+| Stream | Web engines in the WebView |
+|---|---|
+| HLS live, H.264 + AAC, server allows web pages (CORS) | **Plays**, picture and sound |
+| HLS live, H.264 + AAC (no CORS, like nearly every IPTV server) | Fails: the page may not read it |
+| HLS at an address without `.m3u8`, redirected | Fails |
+| HLS film, H.264 + AC-3 | Fails |
+| MPEG-TS live: H.264 + AAC / MP2 / AC-3 / E-AC-3, MPEG-2 + MP2, HEVC + AAC | All six fail |
+| MP4 film, H.264 + AAC · MKV film, H.264 + AC-3 | Both fail |
+| DASH film | Fails |
+| HLS that needs Referer and User-Agent | Fails |
+| Offline address (404) · a web page instead of a stream | Correct error message for each |
+
+What it means: the cause is not the codecs but the page itself. hls.js, dash.js and mpegts.js fetch streams with the page's own requests, and a page served from `https://localhost` may only read servers that send CORS headers, which IPTV servers do not. On a computer `main.js` rewrites those headers for the window; a WebView has no such hook. So on Android **the native player (Phase 5) plays everything**, and the web engines are not used there at all. Run it again with `node test/android/playback-check.js <device>`.
 
 ### Phase 5: Native player plugin (4–7 days)  ·  branch: `android-p5-native-player`
 
