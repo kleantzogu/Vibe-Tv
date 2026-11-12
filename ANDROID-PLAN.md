@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–7 done (milestone M4) · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–7 done, Phase 8 done except the real signing key, the soak test and the merge to `main` · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -368,6 +368,19 @@ Checked on the Android TV emulator with remote keys only (`adb shell input keyev
 - [ ] Soak test (several hours of continuous playback), memory check on a low-end device.
 - [ ] Final `main` → `android` merge, full desktop regression check, then open the single `android` → `main` PR (section 2.6).
 - **Done when:** a tagged release publishes desktop installers plus a signed APK that installs on a clean phone and TV.
+
+**Where Phase 8 stands (2026-11-12):**
+
+- [x] Release build: signing from the environment or `android/keystore.properties` (never in the repo), R8 code shrinking (9.5 MB debug → 2.8 MB release), version from `package.json`, APK named `Vibe-TV-<version>-android.apk`.
+- [x] `release.yml`: an Android job that builds and signs the APK and adds it to the **same** release as the desktop installers. It never creates a release of its own and never touches `latest*.yml`. Without the signing secrets it skips the APK and the desktop release is unaffected.
+- [x] README (install, what differs, known limitations, signing), `SECURITY.md`, and the in-app Acknowledgements (Capacitor, Media3, the Free-TV playlist).
+- [x] A release APK signed with a throwaway key was installed and played the test streams on both emulators.
+- [x] First test on a real phone (Huawei P20, Android 10): 16 channels played, no crashes or player errors in the log.
+- [ ] **The real signing key.** Someone has to create it, back it up, and add the four repository secrets (needs admin rights on the repository). See README, "Signing the Android app".
+- [ ] Soak test (hours of continuous playback), a low-end device, and a real TV box with a real remote.
+- [ ] The `android` → `main` pull request is open for review, not merged.
+
+**Decided: AC-3, E-AC-3, MP2 and DTS sound are left to the device for now.** It is recorded as a known limitation in the README. The options for covering every device later are under Phase 5.
 
 ## 9. Milestones and effort
 
