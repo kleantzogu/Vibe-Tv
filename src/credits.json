@@ -93,6 +93,53 @@
    ]
   },
   {
+   "title": "Android app",
+   "items": [
+    {
+     "name": "@capacitor/android",
+     "version": "8.6.0",
+     "license": "MIT",
+     "url": "https://github.com/ionic-team/capacitor",
+     "purpose": "Runs Vibe TV as an app on Android phones and Android TV",
+     "text": "MIT License\n\nCopyright (c) 2017-present Drifty Co.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+    },
+    {
+     "name": "@capacitor/core",
+     "version": "8.6.0",
+     "license": "MIT",
+     "url": "https://github.com/ionic-team/capacitor",
+     "purpose": "Lets the app’s window talk to the Android side",
+     "text": "MIT License\n\nCopyright (c) 2017-present Drifty Co.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in all\ncopies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE\nSOFTWARE."
+    },
+    {
+     "name": "AndroidX Media3 (ExoPlayer)",
+     "version": "1.8.0",
+     "license": "Apache-2.0",
+     "url": "https://github.com/androidx/media",
+     "licenseUrl": "https://github.com/androidx/media/blob/release/LICENSE",
+     "purpose": "The player on Android: HLS, DASH, MPEG-TS, RTSP and files, decoded by the device",
+     "text": ""
+    },
+    {
+     "name": "Kotlin and AndroidX libraries",
+     "version": "",
+     "license": "Apache-2.0",
+     "url": "https://developer.android.com/jetpack/androidx",
+     "licenseUrl": "https://www.apache.org/licenses/LICENSE-2.0",
+     "purpose": "The language and the standard building blocks of the Android side",
+     "text": ""
+    },
+    {
+     "name": "buffer",
+     "version": "6.0.3",
+     "license": "MIT",
+     "url": "https://github.com/feross/buffer",
+     "purpose": "Byte handling for the shared code inside the Android app",
+     "text": "The MIT License (MIT)\n\nCopyright (c) Feross Aboukhadijeh, and other contributors.\n\nPermission is hereby granted, free of charge, to any person obtaining a copy\nof this software and associated documentation files (the \"Software\"), to deal\nin the Software without restriction, including without limitation the rights\nto use, copy, modify, merge, publish, distribute, sublicense, and/or sell\ncopies of the Software, and to permit persons to whom the Software is\nfurnished to do so, subject to the following conditions:\n\nThe above copyright notice and this permission notice shall be included in\nall copies or substantial portions of the Software.\n\nTHE SOFTWARE IS PROVIDED \"AS IS\", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR\nIMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,\nFITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE\nAUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER\nLIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,\nOUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN\nTHE SOFTWARE."
+    }
+   ]
+  },
+  {
    "title": "Updates",
    "items": [
     {
@@ -114,6 +161,14 @@
      "license": "See their repository",
      "url": "https://github.com/iptv-org/database",
      "purpose": "Logos and categories for channels that only carry a tvg-id, from the public iptv-org database",
+     "text": ""
+    },
+    {
+     "name": "Free-TV",
+     "version": "",
+     "license": "See their repository",
+     "url": "https://github.com/Free-TV/IPTV",
+     "purpose": "The playlist of free channels the Android app starts with. It is downloaded from their repository, not included in the app.",
      "text": ""
     }
    ]

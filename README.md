@@ -4,7 +4,7 @@
 
 <h1 align="center">Vibe TV</h1>
 
-<p align="center">A clean, fast, open-source desktop player for M3U / IPTV playlists, for macOS, Windows and Linux.</p>
+<p align="center">A clean, fast, open-source player for M3U / IPTV playlists, for macOS, Windows, Linux and Android (phones and Android TV).</p>
 
 <p align="center">
   <a href="https://github.com/kleantzogu/Vibe-Tv/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/kleantzogu/Vibe-Tv?label=download"></a>
@@ -51,6 +51,9 @@ Download the installer for your system from the
 - **Windows** (`Setup.exe`): run the installer. SmartScreen may warn that the publisher is unknown;
   choose **More info ▸ Run anyway**.
 - **Linux** (`.AppImage`): make it executable (`chmod +x Vibe*.AppImage`) and run it.
+
+- **Android phone or tablet, Android TV, Google TV, Fire TV** (`Vibe-TV-…-android.apk`, Android 7 or
+  newer): see [Android](#android) below.
 
 Nothing else has to be installed: ffmpeg is included.
 
@@ -104,7 +107,8 @@ Installed copies check GitHub Releases when they start and every six hours. To s
    It uses your `gh` login (or `GH_TOKEN`).
 3. The tag starts the **Release** workflow on GitHub Actions, which builds the Windows and Linux
    installers, runs the same launch check on each, and only then adds them (with `latest.yml` /
-   `latest-linux.yml`) to the same release.
+   `latest-linux.yml`) to the same release. It also builds the signed Android APK and adds it there
+   (see [Signing the Android app](#android)).
 4. Edit the release on GitHub to add notes; the app shows them under "What's new".
 
 People then get the update as chosen in the app menu (Help menu on Windows and Linux) with
@@ -119,6 +123,80 @@ with `VIBE_TV_UPDATE_URL=http://127.0.0.1:8000/`.
 
 To notarize the macOS app, add your Apple ID credentials (or an App Store Connect API key) as
 described in the [electron-builder documentation](https://www.electron.build/code-signing-mac).
+
+## Android
+
+One app for phones and for TVs: the same APK shows a touch layout on a phone and a remote-control
+layout on a TV. It is not in an app store; you install the file yourself.
+
+**Installing**
+
+- **Phone or tablet:** download `Vibe-TV-…-android.apk` from the
+  [Releases](https://github.com/kleantzogu/Vibe-Tv/releases) page on the device, open it, and allow your
+  browser or file manager to install apps when Android asks.
+- **Android TV, Google TV, Fire TV:** turn on Developer options and USB / network debugging on the TV,
+  then from a computer on the same network: `adb connect <tv-address>:5555` and
+  `adb install Vibe-TV-…-android.apk`. (Or use a "send files to TV" app and open the APK on the TV.)
+- **Updating:** install the newer APK over the old one. The app does not update itself.
+
+**What is different from the desktop app**
+
+- **It starts with a playlist.** The first time it runs, the app downloads the
+  [Free-TV](https://github.com/Free-TV/IPTV) playlist (free-to-air and free online channels from around
+  the world) as "Free TV", so there is something to watch at once. It is an ordinary playlist: rename it,
+  add to it or delete it. The desktop app starts empty.
+- **On a phone:** the picture is on top and the channels below; turned sideways, the list is beside
+  the picture. A tap on the picture shows or hides the controls, a double tap goes full screen, a
+  long-press on a channel opens its menu, and Back closes whatever is open. `.m3u` files can be opened
+  with Vibe TV from other apps.
+- **On a TV:** everything works with the remote. Up / down move through the channels and OK plays;
+  OK again (or right) goes full screen, where up / down change channel, OK shows the controls and left
+  returns to the list. Menu opens the ⋯ menu. To type (search, an address, a login), press OK on the
+  field. Playlist files can't be picked on a TV: use Import from URL or an Xtream Codes login.
+- **Playback** uses the device's own decoders through Android's Media3 player, not ffmpeg.
+
+**Known limitations**
+
+- **Sound in AC-3 (Dolby Digital), E-AC-3, MP2 and DTS plays only if the device can decode it.** Most
+  TV boxes can; many phones cannot. The picture still plays and the app says "No sound: this device
+  can't play AC-3 audio". The desktop app converts these with ffmpeg; the Android app does not yet.
+- **MPEG-2 video** likewise needs a decoder on the device (TV boxes usually have one).
+- `rtmp://` addresses are not supported; `rtsp://` and `udp://` are, but have not been tested yet.
+- No picture-in-picture, and the app does not update itself.
+
+**Building it yourself**
+
+You need Node.js 22, a JDK 21 and the Android SDK.
+
+```bash
+npm install
+npm run build:android-web && npx cap sync android
+cd android && ./gradlew assembleDebug     # android/app/build/outputs/apk/debug/app-debug.apk
+```
+
+`test/android/` has test streams and a playback check for an emulator or a connected device, and
+[ANDROID-PLAN.md](ANDROID-PLAN.md) explains how the Android app is put together.
+
+**Signing the Android app**
+
+A release APK has to be signed, always with the same key: Android only installs an update over an app
+signed with the key it was first installed with. **Keep the key and its password safe and backed up;
+if they are lost, nobody can update their installed copy.** Never commit them.
+
+Make the key once:
+
+```bash
+keytool -genkeypair -v -keystore vibe-tv-release.jks -alias vibe-tv -keyalg RSA -keysize 4096 -validity 10000
+```
+
+- **On your computer:** put `KEYSTORE_FILE=/full/path/to/vibe-tv-release.jks`, `KEYSTORE_PASSWORD=…`,
+  `KEY_ALIAS=vibe-tv` and `KEY_PASSWORD=…` in `android/keystore.properties` (Git ignores it), then
+  `cd android && ./gradlew assembleRelease`.
+- **For releases:** add four repository secrets (Settings ▸ Secrets and variables ▸ Actions):
+  `ANDROID_KEYSTORE_BASE64` (the output of `base64 -i vibe-tv-release.jks`), `ANDROID_KEYSTORE_PASSWORD`,
+  `ANDROID_KEY_ALIAS` and `ANDROID_KEY_PASSWORD`. The Release workflow then builds the signed APK and
+  adds it to the same release as the desktop installers. Without the secrets it skips the APK and the
+  desktop release goes ahead as before.
 
 ## Using Vibe TV
 
@@ -298,6 +376,9 @@ scripts/credits.js `npm run credits`: writes src/credits.json, the Acknowledgeme
 .github/           CI and Release workflows, issue and pull request templates
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)
+platform/          What differs per platform: api-contract.js (what the window may ask for), android/ (how Android answers)
+android/           The Android project (Capacitor): manifest, icons, and the app's own plugins in Kotlin
+test/android/      Test streams and a playback check for the Android app
 ```
 
 ## Contributing
@@ -318,4 +399,6 @@ It includes [hls.js](https://github.com/video-dev/hls.js) (Apache 2.0),
 [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static), which is licensed under the GPL and runs
 as a separate program; its license is installed next to it.
 
-Vibe TV is a player only: it doesn't come with any channels. Use it with playlists you have the right to watch.
+Vibe TV is a player only: no channels are included in it. The Android app downloads the public
+[Free-TV](https://github.com/Free-TV/IPTV) playlist the first time it starts; that list is kept by its own
+project, and you can delete it. Use the app with playlists you have the right to watch.

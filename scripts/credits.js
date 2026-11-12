@@ -88,6 +88,12 @@ function build() {
   const updater = take('electron-updater');
   const ffmpegStatic = take('ffmpeg-static');
   const electronPkg = JSON.parse(read('node_modules/electron/package.json'));
+  // The Android app is built from devDependencies (they never go into a desktop installer).
+  const dev = (name, purpose, licenseDir = `node_modules/${name}`) => {
+    const pkg = JSON.parse(read(`node_modules/${name}/package.json`));
+    return { name, version: pkg.version, license: pkg.license, url: repoUrl(pkg), purpose, text: licenseText(licenseDir) };
+  };
+  const media3 = (/media3Version\s*=\s*'([^']+)'/.exec(read('android/variables.gradle')) || [])[1] || '';
 
   return {
     app: {
@@ -156,6 +162,32 @@ function build() {
         ],
       },
       {
+        title: 'Android app',
+        items: [
+          dev('@capacitor/android', 'Runs Vibe TV as an app on Android phones and Android TV'),
+          dev('@capacitor/core', 'Lets the app’s window talk to the Android side'),
+          {
+            name: 'AndroidX Media3 (ExoPlayer)',
+            version: media3,
+            license: 'Apache-2.0',
+            url: 'https://github.com/androidx/media',
+            licenseUrl: 'https://github.com/androidx/media/blob/release/LICENSE',
+            purpose: 'The player on Android: HLS, DASH, MPEG-TS, RTSP and files, decoded by the device',
+            text: '',
+          },
+          {
+            name: 'Kotlin and AndroidX libraries',
+            version: '',
+            license: 'Apache-2.0',
+            url: 'https://developer.android.com/jetpack/androidx',
+            licenseUrl: 'https://www.apache.org/licenses/LICENSE-2.0',
+            purpose: 'The language and the standard building blocks of the Android side',
+            text: '',
+          },
+          dev('buffer', 'Byte handling for the shared code inside the Android app'),
+        ],
+      },
+      {
         title: 'Updates',
         items: [{ ...updater, purpose: 'Checks GitHub for new versions and installs them' }],
       },
@@ -168,6 +200,14 @@ function build() {
             license: 'See their repository',
             url: 'https://github.com/iptv-org/database',
             purpose: 'Logos and categories for channels that only carry a tvg-id, from the public iptv-org database',
+            text: '',
+          },
+          {
+            name: 'Free-TV',
+            version: '',
+            license: 'See their repository',
+            url: 'https://github.com/Free-TV/IPTV',
+            purpose: 'The playlist of free channels the Android app starts with. It is downloaded from their repository, not included in the app.',
             text: '',
           },
         ],

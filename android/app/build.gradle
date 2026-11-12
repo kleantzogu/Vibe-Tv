@@ -5,6 +5,17 @@ apply plugin: 'org.jetbrains.kotlin.android'
 def appVersion = new groovy.json.JsonSlurper().parseText(file('../../package.json').text).version
 def (vMajor, vMinor, vPatch) = appVersion.tokenize('.-').take(3).collect { it.toInteger() }
 
+// The release key. It is never in the repository: its place and passwords come from the environment
+// (VIBE_TV_KEYSTORE_FILE, VIBE_TV_KEYSTORE_PASSWORD, VIBE_TV_KEY_ALIAS, VIBE_TV_KEY_PASSWORD; that is
+// how the Release workflow passes them) or, on your own computer, from android/keystore.properties
+// (KEYSTORE_FILE=..., KEYSTORE_PASSWORD=..., KEY_ALIAS=..., KEY_PASSWORD=...), which Git ignores.
+// Without them `assembleRelease` still builds, but the APK is unsigned and can't be installed.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
+def signing = { String name -> System.getenv('VIBE_TV_' + name) ?: keystoreProps.getProperty(name) }
+def hasReleaseKey = signing('KEYSTORE_FILE') as boolean
+
 android {
     namespace = "com.vibetv.app"
     compileSdk = rootProject.ext.compileSdkVersion
@@ -21,10 +32,31 @@ android {
             ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
         }
     }
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                storeFile rootProject.file(signing('KEYSTORE_FILE'))
+                storePassword signing('KEYSTORE_PASSWORD')
+                keyAlias signing('KEY_ALIAS')
+                keyPassword signing('KEY_PASSWORD')
+            }
+        }
+    }
     buildTypes {
         release {
-            minifyEnabled false
-            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            // R8 removes the code the app never reaches (most of the player library's formats stay).
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKey) signingConfig signingConfigs.release
+            // For checking a release build before it goes out: `./gradlew assembleRelease -PinspectableRelease`
+            // builds the same shrunk code, but lets test/android/playback-check.js look inside it.
+            debuggable project.hasProperty('inspectableRelease')
+        }
+    }
+    // The release APK is named like the desktop installers: Vibe-TV-1.2.3-android.apk
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == 'release') {
+            variant.outputs.all { outputFileName = "Vibe-TV-${appVersion}-android.apk" }
         }
     }
 }

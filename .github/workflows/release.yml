@@ -94,3 +94,85 @@ jobs:
             dist/latest*.yml
           if-no-files-found: error
           retention-days: 14
+
+  # The Android app (phone + Android TV): one signed APK, added to the same release as the desktop
+  # installers. It never makes a release of its own, and never touches latest*.yml: installed desktop
+  # copies read those from the latest release to update themselves.
+  # The signing key comes from repository secrets (see README, "Signing the Android app"). Until they
+  # are set, this job says so and adds nothing, and the desktop release is not affected.
+  android:
+    name: Build (Android)
+    if: github.event_name == 'push' || inputs.only == 'windows and linux'
+    runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
+      PUBLISH: ${{ github.event_name == 'push' || inputs.publish }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      ELECTRON_SKIP_BINARY_DOWNLOAD: 1 # nothing here starts Electron
+      KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+
+      - name: Is there an Android app and a key to sign it with?
+        id: can
+        shell: bash
+        run: |
+          if [ ! -d android ]; then echo "This version has no Android app."; echo "build=false" >> "$GITHUB_OUTPUT"
+          elif [ -z "$KEYSTORE_BASE64" ]; then echo "::warning::No Android signing key (secret ANDROID_KEYSTORE_BASE64): the APK is not built."; echo "build=false" >> "$GITHUB_OUTPUT"
+          else echo "build=true" >> "$GITHUB_OUTPUT"; fi
+
+      - uses: actions/setup-node@v4
+        if: steps.can.outputs.build == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-java@v4
+        if: steps.can.outputs.build == 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: gradle/actions/setup-gradle@v4
+        if: steps.can.outputs.build == 'true'
+
+      - name: Build and sign
+        if: steps.can.outputs.build == 'true'
+        shell: bash
+        env:
+          VIBE_TV_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          VIBE_TV_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          VIBE_TV_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          npm ci
+          npm test
+          npm run build:android-web
+          npx cap sync android
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/release.jks"
+          export VIBE_TV_KEYSTORE_FILE="$RUNNER_TEMP/release.jks"
+          (cd android && ./gradlew assembleRelease --console=plain)
+          rm -f "$RUNNER_TEMP/release.jks"
+          # A release nobody can install is worse than none: the APK must carry a signature.
+          "$ANDROID_HOME"/build-tools/*/apksigner verify android/app/build/outputs/apk/release/Vibe-TV-*-android.apk | tail -1
+
+      - name: Make sure the release exists
+        if: steps.can.outputs.build == 'true' && env.PUBLISH == 'true'
+        shell: bash
+        run: |
+          gh release view "$TAG" >/dev/null 2>&1 ||
+            gh release create "$TAG" --verify-tag --title "Vibe TV ${TAG#v}" --notes "Vibe TV ${TAG#v}" ||
+            gh release view "$TAG" >/dev/null
+
+      - name: Publish
+        if: steps.can.outputs.build == 'true' && env.PUBLISH == 'true'
+        shell: bash
+        run: gh release upload "$TAG" --clobber android/app/build/outputs/apk/release/Vibe-TV-*-android.apk
+
+      - name: Keep the APK with this run
+        if: steps.can.outputs.build == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: vibe-tv-${{ env.TAG }}-Android
+          path: android/app/build/outputs/apk/release/Vibe-TV-*-android.apk
+          if-no-files-found: error
+          retention-days: 14
