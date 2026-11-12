@@ -17,10 +17,20 @@ public class MainActivity extends BridgeActivity {
         super.onCreate(savedInstanceState);
     }
 
-    // Keys of a TV remote that a web page is never told about: Menu, channel up / down and the
-    // play keys. They are handed to the page by name (VibeDevicePlugin "key" event).
+    // Keys of a TV remote that a web page is never told about: Menu, channel up / down, the
+    // play keys, and OK being held down. They are handed to the page by name (VibeDevicePlugin "key" event).
     @Override
     public boolean dispatchKeyEvent(KeyEvent event) {
+        // OK held down: the page is told once ("holdOk"), and never sees the repeats.
+        int code = event.getKeyCode();
+        if ((code == KeyEvent.KEYCODE_DPAD_CENTER || code == KeyEvent.KEYCODE_ENTER || code == KeyEvent.KEYCODE_NUMPAD_ENTER)
+                && event.getAction() == KeyEvent.ACTION_DOWN && event.getRepeatCount() > 0 && getBridge() != null) {
+            if (event.getRepeatCount() == 1) {
+                PluginHandle handle = getBridge().getPlugin("VibeDevice");
+                if (handle != null) ((VibeDevicePlugin) handle.getInstance()).remoteKey("holdOk");
+            }
+            return true;
+        }
         String name = null;
         switch (event.getKeyCode()) {
             case KeyEvent.KEYCODE_MENU: name = "menu"; break;

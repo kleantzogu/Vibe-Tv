@@ -8,8 +8,11 @@
  *
  *   Channel list   up / down move through the channels (the app does that itself), OK plays.
  *                  OK on the channel that is already playing, or right, goes full screen.
+ *                  Holding OK on a channel opens its menu (add to favorites, and so on).
  *   Full screen    up / down change channel, OK or right shows the controls, left goes back to the list.
- *   Controls       left / right move along the buttons, OK presses, Back puts them away.
+ *   Controls       left / right move along the buttons (the favorite star is among them, next to
+ *                  full screen), OK presses, Back puts them away. Up / down change channel, except
+ *                  in a film, where they reach the seek bar.
  *   Everything else (search, filters, menus, dialogs): arrows move between the things on screen.
  *
  * Text: a text field that has the focus hands every key of the remote to Android's keyboard, and the
@@ -118,6 +121,14 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
   }
   const fullscreen = () => { if (!$('player').classList.contains('idle')) $('player').requestFullscreen(); };
 
+  let held = null; // OK pressed on the channel list: { handled, goFull }
+  document.addEventListener('keyup', (e) => {
+    if (e.key !== 'Enter' || !held) return;
+    const h = held;
+    held = null;
+    if (isTv() && h.goFull && !h.handled) fullscreen();
+  }, true);
+
   document.addEventListener('keydown', (e) => {
     if (!isTv() || e.ctrlKey || e.metaKey || e.altKey) return;
     const done = () => { e.preventDefault(); e.stopImmediatePropagation(); };
@@ -125,6 +136,7 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
 
     const arrow = key in AXIS;
     if (!arrow && key !== 'Enter') return;
+    if (key === 'Enter' && e.repeat) return done(); // a held OK presses once (see remoteKey 'holdOk')
     const at = document.activeElement;
     const onTop = menu.isOpen() || !!document.querySelector('dialog[open]') || !$('groupPop').hidden;
 
@@ -138,7 +150,9 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
       if (inControls) {
         if (key === 'Enter') return; // the focused button acts
         if (key === 'ArrowLeft' || key === 'ArrowRight') { move(key); return done(); }
-        hideControls(); // up / down: back to watching, and the app changes channel
+        // Up / down: in a film, to the seek bar and back. Otherwise back to watching, and the app changes channel.
+        if (visible($('seek')) && move(key)) return done();
+        hideControls();
         return;
       }
       if (key === 'Enter' || key === 'ArrowRight') { showControls(); return done(); }
@@ -150,7 +164,11 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
       const cursor = document.querySelector('#list .row.cursor');
       if (key === 'ArrowRight') { fullscreen(); return done(); }
       if (key === 'ArrowLeft') return done();
-      if (key === 'Enter' && cursor && cursor.classList.contains('playing')) { fullscreen(); return done(); }
+      if (key === 'Enter') {
+        // Wait for the key to come up: held, it is a long press (the menu), not "go full screen".
+        held = { handled: false, goFull: !!cursor && cursor.classList.contains('playing') };
+        if (held.goFull) return done();
+      }
       // Up from the first channel leaves the list for what is above it.
       if (key === 'ArrowUp' && (!cursor || cursor.getBoundingClientRect().top <= $('list').getBoundingClientRect().top + 8) && $('list').scrollTop === 0) {
         move(key);
@@ -166,7 +184,10 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
   }, true);
 
   function start() {
-    if (!isTv() || menu.isOpen() || document.querySelector('dialog[open]')) return;
+    if (!isTv()) return;
+    // The favorite star joins the row of buttons, where left / right reach it.
+    if ($('btnFav').parentNode !== $('btnFull').parentNode) $('btnFull').before($('btnFav'));
+    if (menu.isOpen() || document.querySelector('dialog[open]')) return;
     if (!$('welcome').hidden) focus([...$('welcome').querySelectorAll(FOCUSABLE)].filter(visible)[0]);
     else focus($('list'));
   }
@@ -183,6 +204,15 @@ function installTvFocus({ document, isTv, player, menu, promptText }) {
      * Menu opens the ⋯ menu, channel up / down and the play key do what their buttons do.
      */
     remoteKey(name) {
+      // OK held down (MainActivity sees that; a page is not told reliably): the channel's menu.
+      if (name === 'holdOk') {
+        if (!isTv() || menu.isOpen() || document.querySelector('dialog[open]') || document.activeElement !== $('list')) return;
+        const row = document.querySelector('#list .row.cursor');
+        if (!row) return;
+        if (held) held.handled = true;
+        row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true }));
+        return;
+      }
       if (name === 'playPause') $('btnPlay').click();
       else if (name === 'next') $('btnNext').click();
       else if (name === 'previous') $('btnPrev').click();

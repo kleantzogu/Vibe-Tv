@@ -151,7 +151,8 @@ layout on a TV. It is not in an app store; you install the file yourself.
   with Vibe TV from other apps.
 - **On a TV:** everything works with the remote. Up / down move through the channels and OK plays;
   OK again (or right) goes full screen, where up / down change channel, OK shows the controls and left
-  returns to the list. Menu opens the ⋯ menu. To type (search, an address, a login), press OK on the
+  returns to the list. Hold OK on a channel for its menu (add to favorites, and more); in full screen
+  the favorite star is among the buttons. Menu opens the ⋯ menu. To type (search, an address, a login), press OK on the
   field. Playlist files can't be picked on a TV: use Import from URL or an Xtream Codes login.
 - **Playback** uses the device's own decoders through Android's Media3 player, not ffmpeg.
 
