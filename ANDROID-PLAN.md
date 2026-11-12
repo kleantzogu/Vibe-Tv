@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–6 done (milestone M3) · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–7 done (milestone M4) · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -342,6 +342,22 @@ Checked on the Pixel 7 emulator: upright and sideways layout, playing by tap, co
 - [ ] Text entry is painful with a remote: make search optional, keep the on-screen keyboard working, and simplify URL/Xtream entry. Stretch: "send playlist from your phone" via a local page or QR code.
 - [ ] TV launcher assets: banner 320×180, icon, correct `LEANBACK_LAUNCHER` entry.
 - **Done when:** a full session (import, find a channel, play, change channel, switch playlist, quit) works with only the remote on a real TV box.
+
+**What was built (2026-11-12), all in `platform/android/` and the Android project (nothing in `src/` changed):**
+
+- [x] **Focus** (`tv-focus.js`, TV only). Something always has the focus and shows it with a thick ring; an arrow moves it to the nearest thing in that direction; OK presses.
+  - Channel list: up / down move through the channels, OK plays. OK on the channel that is playing, or right, goes full screen.
+  - Full screen: up / down change channel, OK or right shows the controls, left returns to the list. In the controls, left / right move along the buttons and Back puts them away.
+  - Search, filters, menus and dialogs: arrows move between what is on screen. A menu returns the focus to where it was opened from.
+- [x] **Remote keys.** Back as on a phone. Menu, channel up / down and the play / pause keys never reach a web page, so `MainActivity` hands them over by name: Menu opens the ⋯ menu, the others do what their buttons do.
+- [x] **Text entry.** A text field with the focus takes every remote key for Android's keyboard, and the page hears none (the focus could never leave it). On a TV the fields are therefore plain focus stops, and OK on one asks for the text in Android's own dialog, with the TV keyboard.
+- [x] **10-foot layout.** Larger type and buttons, a 3% margin for screens that cut off their edges, nothing that needs a pointer; "Import M3U file" is not offered on the first screen (a TV has no file picker).
+- [x] Launcher banner and `LEANBACK_LAUNCHER` entry (done in Phase 2).
+- [ ] Stretch, "send a playlist from your phone" (QR code or a local page): not done.
+
+**A starting playlist (phone and TV).** The first time the app runs with no playlists it imports the [Free-TV](https://github.com/Free-TV/IPTV) playlist (`playlist.m3u8`, about 2,200 free-to-air and free online channels by country) as "Free TV", so there is something to watch at once. It is fetched from GitHub, not bundled; if there is no connection it is tried again on the next start; once imported it is an ordinary playlist, and deleting it does not bring it back. The desktop app still starts empty. The README's "it doesn't come with any channels" needs rewording for Android in Phase 8.
+
+Checked on the Android TV emulator with remote keys only (`adb shell input keyevent`): first start with the playlist import, moving through channels, playing, full screen, changing channel, the controls, Back, search with the text prompt, filters, the ⋯ menu, the Xtream dialog, and the Menu / channel / play keys; all 14 test streams still play. Not checked on a real TV with a real remote.
 
 ### Phase 8: Hardening, release and merge to `main` (2–3 days)  ·  branch: `android-p8-release`
 

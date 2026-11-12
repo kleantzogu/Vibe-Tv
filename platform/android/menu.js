@@ -10,9 +10,10 @@ function createMenu(document) {
 
   function close(id = null) {
     if (!open) return false;
-    const { back, done } = open;
+    const { back, done, from } = open;
     open = null;
     back.remove();
+    if (from && from.focus && from.isConnected !== false) from.focus({ preventScroll: true }); // back to where the remote was
     done(id);
     return true;
   }
@@ -55,8 +56,9 @@ function createMenu(document) {
       }
       back.appendChild(sheet);
       back.addEventListener('click', (e) => { if (e.target === back) close(); });
+      const from = document.activeElement;
       document.body.appendChild(back);
-      open = { back, done };
+      open = { back, done, from };
       if (first && first.focus) first.focus({ preventScroll: true });
     });
   }
