@@ -19,12 +19,15 @@ const copy = (v) => (v === undefined ? v : JSON.parse(JSON.stringify(v)));
  * @param {function} deps.getDevice    async () => { tv:boolean, version:string }
  * @param {function} deps.probeFetch   fetch() for channel checks: reads only the beginning of a stream
  * @param {object} deps.host           what only the page can do:
- *   { confirm, copyText, credits, openExternal, pickFiles: async () => [{ name, read }] | null }
+ *   { confirm, copyText, credits, openExternal, pickFiles: async () => [{ name, read }] | null,
+ *     popupMenu: async (items) => id | null, openedFiles: (tokens) => [{ name, read }] }
  */
 function createApi({ openBackend, getDevice, probeFetch, host }) {
   let backend = null;
   let tv = false;
   let activeCheck = null;
+  let ready;
+  const whenStarted = new Promise((resolve) => { ready = resolve; });
   const listeners = new Map();
   /** Sends an event to the window, as main.js does with webContents.send. */
   const emit = (event, ...args) => {
@@ -43,6 +46,7 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
       const [b, device] = await Promise.all([openBackend(), getDevice().catch(() => ({}))]);
       backend = b;
       tv = !!device.tv;
+      setTimeout(ready, 0); // once the window has what it asked for
       return {
         state: b.store.data,
         accent: '',
@@ -68,8 +72,12 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
       const files = await host.pickFiles();
       return files && files.length ? started().imports.importTexts(playlistId || '', files) : null;
     }),
-    // Files reach a computer as paths (dropped on the window, opened from the file manager). Here they don't.
-    importFiles: async () => null,
+    // On a computer these are paths (dropped on the window, opened from the file manager). Here they
+    // are tokens for playlist files another app handed over with "Open with" (see "files:opened").
+    importFiles: answer(async (playlistId, tokens) => {
+      const files = host.openedFiles ? host.openedFiles(Array.isArray(tokens) ? tokens : []) : [];
+      return files.length ? started().imports.importTexts(playlistId || '', files) : null;
+    }),
     importUrl: answer((playlistId, url) => started().imports.importUrl(playlistId || '', url)),
     xtreamLogin: answer((form) => started().imports.xtreamLogin(form)),
     xtreamRefresh: answer((id) => started().imports.xtreamRefresh(id)),
@@ -114,7 +122,7 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
       if (activeCheck) activeCheck.cancel();
     },
 
-    popupMenu: async () => null,
+    popupMenu: async (items) => (host.popupMenu ? host.popupMenu(Array.isArray(items) ? items : []) : null),
     confirm: (opts) => host.confirm(opts || {}),
     copyText: (text) => host.copyText(String(text || '')),
     setWindowButtons: nothing,
@@ -154,7 +162,7 @@ function createApi({ openBackend, getDevice, probeFetch, host }) {
     if (backend) backend.store.flush();
   };
 
-  return { api, emit, flush };
+  return { api, emit, flush, whenStarted };
 }
 
 module.exports = { createApi };

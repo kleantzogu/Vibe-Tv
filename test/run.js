@@ -774,6 +774,65 @@ test('android: the stand-in for <video> drives the native player and reports lik
   assert.deepStrictEqual([doc.fullscreenElement, sent('setImmersive').pop().on, changes], [null, false, 2]);
 });
 
+test('android: menus are a sheet in the page, and a tap on the picture shows the controls instead of pausing', async () => {
+  const { createMenu } = require('../platform/android/menu.js');
+  const { installTouch } = require('../platform/android/touch.js');
+  class El extends EventTarget {
+    constructor() { super(); this.children = []; this.attrs = {}; this.textContent = ''; this.className = ''; const set = new Set(); this.classList = { add: (c) => set.add(c), remove: (c) => set.delete(c), contains: (c) => set.has(c) }; }
+    appendChild(c) { this.children.push(c); c.parent = this; return c; }
+    remove() { this.parent.children = this.parent.children.filter((c) => c !== this); }
+    setAttribute(n, v) { this.attrs[n] = v; }
+    click() { this.dispatchEvent(Object.assign(new Event('click'), {})); }
+  }
+  const doc = { createElement: () => new El(), body: new El() };
+  const menu = createMenu(doc);
+  const rows = () => doc.body.children[0].children[0].children;
+
+  const chosen = menu.show([{ id: 'play', label: 'Play' }, { type: 'separator' }, { id: 'hide', label: 'Hide Offline Channels', checked: true }, { id: 'no', label: 'Not now', enabled: false }]);
+  assert.deepStrictEqual(rows().map((r) => r.className), ['sheet-item', 'sheet-sep', 'sheet-item', 'sheet-item']);
+  assert.deepStrictEqual([rows()[2].attrs['aria-checked'], rows()[2].children[0].textContent, rows()[3].disabled, rows()[0].children[1].textContent], ['true', '✓', true, 'Play']);
+  rows()[2].click();
+  assert.deepStrictEqual([await chosen, doc.body.children.length, menu.isOpen()], ['hide', 0, false]);
+
+  // Back, or a tap beside the sheet, closes it without choosing; a second menu replaces the first.
+  const first = menu.show([{ id: 'a', label: 'A' }]);
+  const second = menu.show([{ id: 'b', label: 'B' }]);
+  assert.deepStrictEqual([await first, doc.body.children.length], [null, 1]);
+  assert.strictEqual(menu.close(), true);
+  assert.deepStrictEqual([await second, menu.close()], [null, false]);
+
+  // Touch: the app's own handlers (installed after) never see a finger on the picture.
+  const video = new El();
+  const playerEl = new El();
+  installTouch({ video, playerEl });
+  const seenByApp = [];
+  for (const type of ['pointerdown', 'pointermove', 'pointerup']) video.addEventListener(type, (e) => seenByApp.push(e.pointerType + ' ' + type));
+  let shown = 0;
+  playerEl.addEventListener('mousemove', () => { shown++; playerEl.classList.remove('controls-hidden'); });
+  const point = (type, pointerType, x = 10, y = 10) => video.dispatchEvent(Object.assign(new Event(type), { pointerType, pointerId: 1, clientX: x, clientY: y }));
+  const tap = () => { point('pointerdown', 'touch'); point('pointerup', 'touch'); };
+
+  playerEl.classList.add('idle');
+  tap();
+  assert.strictEqual(shown, 0); // nothing playing: nothing to show
+  playerEl.classList.remove('idle');
+  playerEl.classList.add('controls-hidden');
+  tap();
+  assert.deepStrictEqual([shown, playerEl.classList.contains('controls-hidden')], [1, false]);
+  tap();
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), true); // and a second tap hides them again
+  point('pointerdown', 'touch');
+  point('pointerup', 'touch', 200, 10); // a swipe is not a tap
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), true);
+  playerEl.classList.add('paused');
+  playerEl.classList.remove('controls-hidden');
+  tap();
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), false); // paused: the controls stay
+  point('pointerdown', 'mouse');
+  point('pointerup', 'mouse');
+  assert.deepStrictEqual(seenByApp, ['mouse pointerdown', 'mouse pointerup']); // a mouse works as on a computer
+});
+
 test('android: the web app builds, with nothing from Node in it', async () => {
   const { build } = require('../scripts/build-android-web.js');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-www-'));
