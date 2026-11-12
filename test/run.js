@@ -683,6 +683,97 @@ test('android: storage, imports and channel checks through the native plugins', 
   });
 });
 
+test('android: the stand-in for <video> drives the native player and reports like a video element', async () => {
+  const { installNativePlayer, kindOf } = require('../platform/android/player.js');
+  assert.deepStrictEqual(['http://a/x.m3u8?t=1', 'http://a/x.mpd', 'http://a/live/u/p/1.ts', 'rtsp://a/x', 'http://a/play'].map(kindOf), ['hls', 'dash', '', '', '']);
+
+  // Just enough of a page: elements that take events, attributes and classes.
+  class El extends EventTarget {
+    constructor(id) { super(); this.id = id || ''; this.attrs = {}; this.hidden = false; this.textContent = ''; this.rect = { left: 300, top: 0, width: 500, height: 400 }; const set = new Set(); this.classList = { add: (c) => set.add(c), toggle: (c, on) => (on ? set.add(c) : set.delete(c)), contains: (c) => set.has(c) }; }
+    getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; }
+    setAttribute(n, v) { this.attrs[n] = String(v); }
+    removeAttribute(n) { delete this.attrs[n]; }
+    getBoundingClientRect() { return this.rect; }
+    replaceWith(other) { byId[other.id] = other; }
+    after() {}
+  }
+  const byId = { video: new El('video'), player: new El('player') };
+  const doc = Object.assign(new EventTarget(), {
+    getElementById: (id) => byId[id],
+    createElement: () => new El(),
+    documentElement: new El(),
+    defaultView: { addEventListener() {}, setInterval() {} },
+  });
+  const calls = [];
+  const listeners = {};
+  const plugin = { addListener: (name, fn) => { listeners[name] = fn; } };
+  for (const m of ['play', 'stop', 'pause', 'resume', 'seek', 'setVolume', 'setRect', 'setImmersive']) plugin[m] = async (args) => { calls.push([m, args]); };
+  const sent = (m) => calls.filter((c) => c[0] === m).map((c) => c[1]);
+  let probed = { ok: false, kind: 'webpage', reason: 'webpage' };
+  const player = installNativePlayer({ plugin, document: doc, isTv: () => false, probe: async () => probed });
+  const video = byId.video;
+  assert.ok(video === player.element && doc.documentElement.classList.contains('native-player'));
+
+  const events = [];
+  for (const e of ['play', 'playing', 'waiting', 'pause', 'ended', 'durationchange', 'resize']) video.addEventListener(e, () => events.push(e));
+  const errors = [];
+  const engine = player.start({ url: 'http://tv.example/live/u/p/1.ts', headers: { userAgent: 'Box/1', referrer: 'http://ref.example/' } }, (reason, detail) => errors.push([reason, detail]));
+  const session = sent('play')[0].session;
+  assert.deepStrictEqual(sent('play')[0], { url: 'http://tv.example/live/u/p/1.ts', userAgent: 'Box/1', referrer: 'http://ref.example/', kind: '', session });
+  assert.deepStrictEqual(sent('setRect')[0], { x: 300, y: 0, width: 500, height: 400 });
+  assert.deepStrictEqual([video.paused, video.src, Number.isNaN(video.duration)], [false, 'http://tv.example/live/u/p/1.ts', true]);
+
+  // A live channel: buffering, then playing. Twice-a-second reports are not new "playing" events.
+  listeners.state({ session, state: 'buffering', position: 0, duration: -1, live: true, width: 0, height: 0 });
+  listeners.state({ session, state: 'playing', position: 0.4, duration: -1, live: true, width: 1280, height: 720 });
+  listeners.state({ session, state: 'playing', position: 0.9, duration: -1, live: true, width: 1280, height: 720 });
+  listeners.state({ session: session - 1, state: 'ended', position: 9, duration: 9, live: false, width: 1, height: 1 }); // from a channel that was left
+  assert.deepStrictEqual(events, ['play', 'waiting', 'durationchange', 'waiting', 'resize', 'playing']);
+  assert.deepStrictEqual([video.currentTime, video.duration, video.videoHeight, engine.isLive(), video.paused], [0.9, Infinity, 720, true, false]);
+
+  // Pausing from the page and from outside it (a phone call), volume, and seeking in a film.
+  video.pause();
+  assert.deepStrictEqual([video.paused, sent('pause').length], [true, 1]);
+  await video.play();
+  listeners.state({ session, state: 'paused', position: 5, duration: 60, live: false, width: 1280, height: 720 });
+  assert.deepStrictEqual([video.paused, video.duration, engine.isLive(), sent('resume').length], [true, 60, false, 1]);
+  video.muted = true;
+  video.volume = 0.4;
+  video.currentTime = 30;
+  assert.deepStrictEqual([sent('setVolume').pop(), sent('seek').pop(), video.currentTime], [{ volume: 0.4, muted: true }, { position: 30 }, 30]);
+
+  // Sound the device can't decode is said, not hidden; nothing decodable at all is an error.
+  listeners.tracks({ session, noSound: true, noPicture: false, audio: 'audio/ac3', video: 'video/avc' });
+  assert.strictEqual(video.hasSound, false);
+  listeners.tracks({ session, noSound: true, noPicture: true, audio: 'audio/mpeg-L2', video: 'video/mpeg2' });
+  assert.deepStrictEqual(errors.pop(), ['unsupported', 'MPEG-2 video and MP2 sound']);
+
+  // An address that is not a stream is looked at to say why: a web page here, a dead server next.
+  const again = (cb) => player.start({ url: 'http://tv.example/page' }, cb);
+  again((reason) => errors.push(reason));
+  await listeners.error({ session: sent('play').pop().session, reason: 'unsupported', detail: 'ERROR_CODE_PARSING_MANIFEST_MALFORMED' });
+  probed = { ok: false, reason: 'http', status: 404 };
+  again((reason, detail) => errors.push(reason + ' ' + detail));
+  await listeners.error({ session: sent('play').pop().session, reason: 'unsupported', detail: 'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED' });
+  again((reason, detail) => errors.push(reason + ' ' + detail));
+  await listeners.error({ session: sent('play').pop().session, reason: 'offline', detail: 'ERROR_CODE_IO_BAD_HTTP_STATUS' });
+  assert.deepStrictEqual(errors, ['webpage', 'offline http', 'offline ERROR_CODE_IO_BAD_HTTP_STATUS']);
+
+  // Letting go of the stream, the way the app does it.
+  video.removeAttribute('src');
+  video.load();
+  assert.deepStrictEqual([sent('stop').length > 0, video.paused, video.videoHeight], [true, true, 0]);
+  await assert.rejects(video.play(), /Nothing to play/);
+
+  // Full screen is done by the app, not the page: the player covers it and the phone turns sideways.
+  let changes = 0;
+  doc.addEventListener('fullscreenchange', () => changes++);
+  await byId.player.requestFullscreen();
+  assert.deepStrictEqual([doc.fullscreenElement === byId.player, sent('setImmersive').pop(), doc.documentElement.classList.contains('native-full')], [true, { on: true, landscape: true }, true]);
+  await doc.exitFullscreen();
+  assert.deepStrictEqual([doc.fullscreenElement, sent('setImmersive').pop().on, changes], [null, false, 2]);
+});
+
 test('android: the web app builds, with nothing from Node in it', async () => {
   const { build } = require('../scripts/build-android-web.js');
   const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-www-'));

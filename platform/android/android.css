@@ -7,3 +7,22 @@
 /* The first screen: its three buttons don't fit side by side on a phone. */
 .welcome { padding: 24px; }
 .welcome-actions { flex-wrap: wrap; justify-content: center; }
+
+/*
+ * The player. The picture is drawn by the native player *behind* the page (platform/android/player.js),
+ * so the page is see-through where the picture goes; everything else keeps its own background.
+ */
+html.native-player, .native-player body { background: transparent; }
+.native-player .stage, .native-player .player { background: transparent; }
+.native-video { position: absolute; inset: 0; width: 100%; height: 100%; }
+
+/* "No sound: this device can't play AC-3 audio" */
+.native-note {
+  position: absolute; left: 50%; top: 14px; transform: translateX(-50%); z-index: 3; max-width: calc(100% - 32px);
+  padding: 6px 12px; border-radius: 999px; background: rgba(0, 0, 0, 0.7); color: #fff; font-size: 12.5px; text-align: center; pointer-events: none;
+}
+
+/* Full screen: the player covers the page (the system bars are hidden by the app). */
+.native-full .player { position: fixed; inset: 0; z-index: 40; width: 100vw; height: 100vh; }
+/* The player is see-through, so what it covers has to go, or it would show through the picture. */
+.native-full .app > :not(.stage) { visibility: hidden; }

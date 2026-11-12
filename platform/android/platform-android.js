@@ -10,11 +10,13 @@ const { createBackend } = require('./backend');
 const { nativeStorage } = require('./storage-native');
 const { createNativeFetch } = require('./native-fetch');
 const { decodeText } = require('../../lib/imports');
+const { installNativePlayer } = require('./player');
 
 // The app's own plugins: android/app/src/main/java/com/vibetv/app/
 const VibeDevice = registerPlugin('VibeDevice');
 const VibeFiles = registerPlugin('VibeFiles');
 const VibeHttp = registerPlugin('VibeHttp');
+const VibePlayer = registerPlugin('VibePlayer');
 let device = null;
 
 // Lets the person choose playlist files with the system's picker. Resolves with null when they cancel.
@@ -59,10 +61,24 @@ document.addEventListener('visibilitychange', () => {
   if (document.visibilityState === 'hidden') flush();
 });
 
-// Android's WebView paints a large grey play button on a video that has nothing to show yet.
-// A transparent poster keeps the player area as the app draws it.
-for (const video of document.querySelectorAll('video')) {
-  if (!video.poster) video.poster = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==';
-}
+// The player: the app's <video> is swapped for a stand-in that drives the native player (player.js).
+let tv = false;
+Promise.resolve(VibeDevice.getInfo()).then((d) => { tv = !!d.tv; }).catch(() => {});
+const nativePlayer = installNativePlayer({ plugin: VibePlayer, document, isTv: () => tv, probe: (url, headers) => api.probe(url, headers) });
+window.vibeNativePlayer = nativePlayer;
+
+// Back (the button, the gesture, or Back on a remote) closes what is open, from the top down, and
+// leaves the app when nothing is.
+VibeDevice.addListener('back', () => {
+  const dialog = [...document.querySelectorAll('dialog[open]')].pop();
+  if (dialog) {
+    if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();
+    return;
+  }
+  const pop = document.getElementById('groupPop');
+  if (pop && !pop.hidden) return void pop.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+  if (nativePlayer.isFullscreen()) return nativePlayer.exitFullscreen();
+  VibeDevice.leave();
+});
 
 window.api = api;

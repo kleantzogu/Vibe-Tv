@@ -11,6 +11,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(VibeDevicePlugin.class);
         registerPlugin(VibeFilesPlugin.class);
         registerPlugin(VibeHttpPlugin.class);
+        registerPlugin(VibePlayerPlugin.class);
         super.onCreate(savedInstanceState);
     }
 }

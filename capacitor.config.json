@@ -2,7 +2,6 @@
   "appId": "com.vibetv.app",
   "appName": "Vibe TV",
   "webDir": "www",
-  "backgroundColor": "#161618",
   "android": {
     "allowMixedContent": true
   },

@@ -52,7 +52,9 @@ const PLAY = (name) => `
     result, secs,
     picture: video.videoWidth ? video.videoWidth + 'x' + video.videoHeight : 'none',
     sound: result === 'plays' ? (sound === undefined ? '?' : sound ? 'yes' : 'NO') : '',
-    detail: document.getElementById('overlayError').hidden ? document.getElementById('liveInfo').textContent : document.getElementById('errorDetail').textContent.slice(0, 70),
+    detail: document.getElementById('overlayError').hidden
+      ? [document.getElementById('liveInfo').textContent, (document.querySelector('.native-note') || {}).textContent].filter(Boolean).join(' · ')
+      : (document.getElementById('errorDetail').title || document.getElementById('errorDetail').textContent).slice(0, 90),
   };`;
 
 console.log(`${inApp(IMPORT)} test channels imported on ${serial}`);

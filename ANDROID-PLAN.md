@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–4 done · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–5 done (milestone M3 minus the phone layout) · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -278,13 +278,40 @@ What it means: the cause is not the codecs but the page itself. hls.js, dash.js 
 
 ### Phase 5: Native player plugin (4–7 days)  ·  branch: `android-p5-native-player`
 
-- [ ] Kotlin Capacitor plugin `VibePlayer` using Media3 ExoPlayer: `play(url, headers)`, `stop`, `pause/resume`, volume/mute, state events (buffering, playing, error with a reason the UI already understands: `offline`, `codec`, `timeout`).
-- [ ] Sources: HLS, DASH, progressive/MPEG-TS, RTSP, UDP; per-stream Referer and User-Agent headers; redirect and cleartext handling.
-- [ ] Rendering: **spike first.** Preferred: native video surface behind a transparent WebView so the existing overlay UI (sidebar, quick search) still works. Fallback: a separate full-screen player activity with its own minimal controls.
-- [ ] Hook `src/app.js` playback so Android uses the native player and skips hls.js/mpegts.js/ffmpeg conversion; keep web engines for desktop.
-- [ ] Decoder gaps: hardware decode of MPEG-2 and AC-3/E-AC-3 varies by device, and DTS is rarely supported. If a target box lacks audio codecs, evaluate Media3's FFmpeg audio decoder extension (built locally) or libVLC. Check the licences before shipping either, and keep `armeabi-v7a` in the build if native libraries are added.
-- [ ] Android integration: audio focus, keep-screen-on, resume after app switch, Back-button behavior, fullscreen immersive mode.
+- [x] Kotlin Capacitor plugin `VibePlayer` using Media3 ExoPlayer: `play(url, headers)`, `stop`, `pause/resume`, volume/mute, state events (buffering, playing, error with a reason the UI already understands: `offline`, `codec`, `timeout`).
+- [x] Sources: HLS, DASH, progressive/MPEG-TS, RTSP, UDP; per-stream Referer and User-Agent headers; redirect and cleartext handling.
+- [x] Rendering: **spike first.** Preferred: native video surface behind a transparent WebView so the existing overlay UI (sidebar, quick search) still works. Fallback: a separate full-screen player activity with its own minimal controls.
+- [x] Hook `src/app.js` playback so Android uses the native player and skips hls.js/mpegts.js/ffmpeg conversion; keep web engines for desktop.
+- [ ] Decoder gaps (evaluated, decision open, see below): hardware decode of MPEG-2 and AC-3/E-AC-3 varies by device, and DTS is rarely supported. If a target box lacks audio codecs, evaluate Media3's FFmpeg audio decoder extension (built locally) or libVLC. Check the licences before shipping either, and keep `armeabi-v7a` in the build if native libraries are added.
+- [x] Android integration: audio focus, keep-screen-on, resume after app switch, Back-button behavior, fullscreen immersive mode.
 - **Done when:** every channel in the test set that plays on desktop also plays on at least one phone and one real TV device, including the header-protected one.
+
+**How it was built (2026-11-12):**
+
+- **Rendering: the preferred way works.** The native picture is drawn behind a see-through WebView, in the rectangle the page's player occupies, so the app's own controls, sidebar and quick search stay on top. No separate player activity was needed.
+- **One hook in `src/app.js`.** The page's `<video>` is swapped for a stand-in with the same properties, methods and events (`platform/android/player.js`), so the rest of the app drives the native player without knowing. `play()` hands the channel to `window.vibeNativePlayer` when it exists.
+- **Full screen** is done by the app rather than the page: the player covers the page, the system bars hide, and a phone turns sideways. Back (button, gesture or remote) closes dialogs, then full screen, then leaves the app.
+- Audio focus, pausing when headphones are pulled out, keep-screen-on while playing, and pause / resume when the app is left and reopened are handled in the plugin.
+
+**Result with `node test/android/playback-check.js` (emulators, Android 14):**
+
+| Stream | Phone emulator | Android TV emulator |
+|---|---|---|
+| HLS live (with and without CORS, and at an address without `.m3u8`) | Plays | Plays |
+| MPEG-TS live, H.264 + AAC · HEVC + AAC | Plays | Plays |
+| MP4 film · DASH film | Plays, seekable | Plays, seekable |
+| HLS that needs Referer and User-Agent | Plays | Plays |
+| Anything with AC-3, E-AC-3 or MP2 sound (5 streams) | Picture plays, **no sound**, and the app says so | Same |
+| MPEG-TS, MPEG-2 video + MP2 sound | "This device has no decoder for MPEG-2 video and MP2 sound" | Picture plays, no sound |
+| Offline address · web page | Correct message for each | Correct message for each |
+
+13 of 14 playable streams start on the phone emulator and 14 of 14 on the TV emulator (the web engines managed 1). Not tested: `rtsp://` and `udp://` (cannot be served to an emulator from here; the player has the modules for them), and real devices.
+
+**Open decision: sound in AC-3, E-AC-3, MP2 and DTS.** Emulators have no decoder for them; real TV boxes usually do, many phones do not, and MP2 and AC-3 are common on IPTV. Three ways to cover every device:
+
+1. Build Media3's own FFmpeg audio extension (audio decoders only, LGPL build). Clean licence, but needs the Android NDK, a build step in CI, and `armeabi-v7a` + `arm64-v8a` libraries in the APK (a few MB).
+2. Use a prebuilt extension such as Jellyfin's. No build step, but it is GPL-3, which would put the Android APK under GPL terms.
+3. Leave it to the device and keep the "No sound" message.
 
 ### Phase 6: Phone experience (3–4 days)  ·  branch: `android-p6-phone-ui`
 

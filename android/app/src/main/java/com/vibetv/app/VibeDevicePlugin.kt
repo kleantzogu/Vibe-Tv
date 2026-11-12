@@ -17,6 +17,28 @@ import com.getcapacitor.annotation.CapacitorPlugin
 @CapacitorPlugin(name = "VibeDevice")
 class VibeDevicePlugin : Plugin() {
 
+    // The Back button (and Back on a remote) is handed to the page as a "back" event; the page closes
+    // what is open, and asks to leave the app when nothing is.
+    override fun load() {
+        activity.runOnUiThread {
+            activity.onBackPressedDispatcher.addCallback(
+                activity,
+                object : androidx.activity.OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        notifyListeners("back", JSObject())
+                    }
+                }
+            )
+        }
+    }
+
+    /** Leaves the app the way Back does on its first screen: it goes to the background, still open. */
+    @PluginMethod
+    fun leave(call: PluginCall) {
+        activity.moveTaskToBack(true)
+        call.resolve()
+    }
+
     @PluginMethod
     fun getInfo(call: PluginCall) {
         val uiMode = context.getSystemService(Context.UI_MODE_SERVICE) as? UiModeManager
