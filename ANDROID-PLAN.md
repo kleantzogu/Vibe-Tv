@@ -1,6 +1,6 @@
 # Vibe TV for Android (phone + Android TV): plan
 
-Status: in progress · Written: 2026-11-11 · Phases 0–5 done (milestone M3 minus the phone layout) · Work happens on a dedicated `android` branch (see section 2)
+Status: in progress · Written: 2026-11-11 · Phases 0–6 done (milestone M3) · Work happens on a dedicated `android` branch (see section 2)
 
 > **Changes made while building it** (the text below is updated to match):
 > - Sub-branches are named `android-p1-…`, not `android/p1-…`: Git cannot have a branch `android` and a branch `android/x` at the same time.
@@ -319,6 +319,20 @@ What it means: the cause is not the codecs but the page itself. hls.js, dash.js 
 - [ ] Touch: tap to play, long-press for the context menu, swipe to open the channel list, safe-area/notch insets, orientation handling.
 - [ ] Back button, optional Picture-in-Picture, split-screen sanity check.
 - **Done when:** one-handed use in portrait is comfortable and nothing relies on hover or right-click.
+
+**What was built (2026-11-12), all in `platform/android/` (nothing in `src/` changed):**
+
+- [x] **Upright:** the picture across the top (16:9), the playlist and channels below it. **Sideways:** the list beside the picture, as on a computer but narrower; full screen is one tap and turns the phone sideways by itself.
+- [x] **Sized for a finger:** larger text, 42–46 px buttons, favourite stars always visible (no hover), no volume slider (the phone's keys do that), no window-dragging or sidebar-resizing.
+- [x] **A tap on the picture** shows or hides the controls and never pauses; a double tap goes full screen.
+- [x] **Menus** (`api.popupMenu`) are a sheet that slides up from the bottom; a **long-press** on a channel or group opens its menu.
+- [x] **Back** closes the menu, then dialogs, then full screen, then leaves the app.
+- [x] **"Open with Vibe TV"** for `.m3u` / `.m3u8` files from other apps (by file type, as Android does).
+- [ ] Picture-in-Picture (optional): not done; its button is hidden on Android.
+- [ ] Swipe gestures on the picture (next / previous channel): not done; the buttons do it.
+- [ ] Split-screen and tablets: not tried.
+
+Checked on the Pixel 7 emulator: upright and sideways layout, playing by tap, controls by tap, the ⋯ menu, the long-press channel menu, Back by swipe, the Xtream dialog, and a playlist file opened from outside. The Android TV emulator still plays all 14 test streams. Not checked on a real phone.
 
 ### Phase 7: Android TV experience (4–6 days)  ·  branch: `android-p7-tv-ui`
 

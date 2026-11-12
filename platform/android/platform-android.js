@@ -11,6 +11,8 @@ const { nativeStorage } = require('./storage-native');
 const { createNativeFetch } = require('./native-fetch');
 const { decodeText } = require('../../lib/imports');
 const { installNativePlayer } = require('./player');
+const { createMenu } = require('./menu');
+const { installTouch } = require('./touch');
 
 // The app's own plugins: android/app/src/main/java/com/vibetv/app/
 const VibeDevice = registerPlugin('VibeDevice');
@@ -33,7 +35,13 @@ function pickFiles() {
   });
 }
 
-const { api, flush } = createApi({
+const menu = createMenu(document);
+
+// Playlist files another app handed over ("Open with Vibe TV"), until the app imports them.
+const opened = new Map(); // token -> { name, data (base64) }
+const bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
+
+const { api, flush, emit, whenStarted } = createApi({
   openBackend: () =>
     createBackend({
       storage: nativeStorage(VibeFiles),
@@ -53,6 +61,13 @@ const { api, flush } = createApi({
       window.open(url, '_blank');
     },
     pickFiles,
+    popupMenu: (items) => menu.show(items),
+    openedFiles: (tokens) =>
+      tokens.filter((t) => opened.has(t)).map((t) => {
+        const f = opened.get(t);
+        opened.delete(t);
+        return { name: f.name, read: async () => decodeText(bytesOf(f.data)) };
+      }),
   },
 });
 
@@ -66,10 +81,20 @@ let tv = false;
 Promise.resolve(VibeDevice.getInfo()).then((d) => { tv = !!d.tv; }).catch(() => {});
 const nativePlayer = installNativePlayer({ plugin: VibePlayer, document, isTv: () => tv, probe: (url, headers) => api.probe(url, headers) });
 window.vibeNativePlayer = nativePlayer;
+installTouch({ video: nativePlayer.element, playerEl: document.getElementById('player') });
+
+// "Open with Vibe TV" on a playlist file: the app imports it, as when a file is opened on a computer.
+let openedCount = 0;
+VibeDevice.addListener('opened', (file) => {
+  const token = `opened:${++openedCount}`;
+  opened.set(token, file);
+  whenStarted.then(() => emit('files:opened', [token]));
+});
 
 // Back (the button, the gesture, or Back on a remote) closes what is open, from the top down, and
 // leaves the app when nothing is.
 VibeDevice.addListener('back', () => {
+  if (menu.close()) return;
   const dialog = [...document.querySelectorAll('dialog[open]')].pop();
   if (dialog) {
     if (dialog.dispatchEvent(new Event('cancel', { cancelable: true }))) dialog.close();
