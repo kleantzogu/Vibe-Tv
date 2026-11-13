@@ -1,0 +1,13 @@
+{
+  "appId": "com.vibetv.app",
+  "appName": "Vibe TV",
+  "webDir": "www",
+  "android": {
+    "allowMixedContent": true
+  },
+  "plugins": {
+    "SystemBars": {
+      "insetsHandling": "native"
+    }
+  }
+}

@@ -32,11 +32,17 @@
     "test": "node test/run.js",
     "dist": "electron-builder",
     "release": "node scripts/release.js",
-    "credits": "node scripts/credits.js"
+    "credits": "node scripts/credits.js",
+    "build:android-web": "node scripts/build-android-web.js"
   },
   "devDependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/cli": "8.6.0",
+    "@capacitor/core": "8.6.0",
+    "buffer": "6.0.3",
     "electron": "44.10.0",
-    "electron-builder": "26.18.0"
+    "electron-builder": "26.18.0",
+    "esbuild": "0.28.2"
   },
   "build": {
     "appId": "com.vibetv.app",

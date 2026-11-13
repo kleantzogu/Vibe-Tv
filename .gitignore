@@ -2,3 +2,13 @@ node_modules/
 dist/
 .dev/
 .DS_Store
+
+# Android (see ANDROID-PLAN.md): build outputs and signing keys are never committed
+www/
+android/build/
+android/app/build/
+android/.gradle/
+android/local.properties
+android/keystore.properties
+*.jks
+*.keystore

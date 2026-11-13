@@ -8,6 +8,12 @@ const { buildIndex, lookup } = require('../lib/channeldb.js');
 const { XmltvParser, loadGuide, parseTime } = require('../lib/epg.js');
 const { probe, sniff, checkAll } = require('../lib/probe.js');
 const { Library } = require('../lib/library.js');
+const { Store } = require('../lib/store.js');
+const nodeStorage = require('../lib/storage-node.js');
+const { memoryStorage } = require('../lib/storage-memory.js');
+const { DEFAULTS, pruneStatus, applyPatch } = require('../lib/state.js');
+const { createImports, decodeText } = require('../lib/imports.js');
+const contract = require('../platform/api-contract.js');
 const xtream = require('../lib/xtream.js');
 const codecs = require('../lib/codecs.js');
 const { Updates, notesText, friendlyError } = require('../lib/updates.js');
@@ -229,7 +235,7 @@ test('check: limits per server, retries passing failures once', async () => {
 test('playlists: import appends, skips duplicates, converts old playlists', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-lib-'));
   const store = { data: { playlists: [{ id: 'old1', name: 'Old', kind: 'file', source: '/x.m3u' }], activePlaylistId: '' }, save() {} };
-  const lib = new Library(store, dir, async () => '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n');
+  const lib = new Library(store, dir, async () => '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n', nodeStorage);
   try {
     const p = lib.create('Mine');
     const a = '#EXTM3U\n#EXTINF:-1 group-title="News",One\nhttp://a/1\n#EXTINF:-1,Two\nhttp://a/2\n';
@@ -240,10 +246,10 @@ test('playlists: import appends, skips duplicates, converts old playlists', asyn
     await assert.rejects(lib.importText(p.id, 'hello'), /no channels/);
 
     // Read back from disk, as after a restart.
-    const again = new Library(store, dir);
+    const again = new Library(store, dir, null, nodeStorage);
     assert.deepStrictEqual((await again.channels(p.id)).map((c) => c.name), ['One', 'Two', 'Three']);
     await again.removeChannels(p.id, ['http://a/2']);
-    assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.url), ['http://a/1', 'http://a/3']);
+    assert.deepStrictEqual((await new Library(store, dir, null, nodeStorage).channels(p.id)).map((c) => c.url), ['http://a/1', 'http://a/3']);
 
     // A playlist from an older version holds no channels, only a file; it is converted on first use.
     const old = await lib.channels('old1');
@@ -306,7 +312,7 @@ test('xtream: reads logins, lists channels and movies, refreshes a playlist', as
     // Refreshing replaces the channels: new ones come in, ones the server dropped go.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-xt-'));
     const store = { data: { playlists: [], activePlaylistId: '' }, save() {} };
-    const lib = new Library(store, dir);
+    const lib = new Library(store, dir, null, nodeStorage);
     try {
       const p = lib.create('TV');
       await lib.addChannels(p.id, r.channels.slice(0, 2));
@@ -314,7 +320,7 @@ test('xtream: reads logins, lists channels and movies, refreshes a playlist', as
       const again = await xtream.loadAccount(fetch, { server: base, username: 'me', password: 'secret' });
       const res = await lib.replaceChannels(p.id, again.channels);
       assert.deepStrictEqual([res.added, res.removed, p.count], [1, 1, 2]);
-      assert.deepStrictEqual((await new Library(store, dir).channels(p.id)).map((c) => c.name), ['Sport', 'Kids']);
+      assert.deepStrictEqual((await new Library(store, dir, null, nodeStorage).channels(p.id)).map((c) => c.name), ['Sport', 'Kids']);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -427,6 +433,499 @@ test('startup: recovery after failed starts, and private details kept out', () =
   const url = startup.issueUrl({ owner: 'o', repo: 'r' }, { version: '1.3.0', platform: 'win32', arch: 'x64', error: 'boom' });
   assert.ok(url.startsWith('https://github.com/o/r/issues/new?labels=bug&title=Vibe%20TV%201.3.0'));
   assert.ok(decodeURIComponent(url).includes('boom'));
+});
+
+test('storage: settings are saved to a file in one step, and read back over the defaults', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'm3u-store-'));
+  const file = path.join(dir, 'deep', 'settings.json');
+  try {
+    const s = new Store(file, DEFAULTS, nodeStorage);
+    assert.deepStrictEqual(s.data, DEFAULTS);
+    s.data.favorites.push('http://a/1');
+    s.data.settings.volume = 0.5;
+    s.flush();
+    assert.deepStrictEqual(fs.readdirSync(path.dirname(file)), ['settings.json']); // no temporary file left behind
+    assert.deepStrictEqual(JSON.parse(fs.readFileSync(file, 'utf8')), s.data);
+
+    // A file from an older version: missing settings take their defaults, unknown keys are dropped.
+    fs.writeFileSync(file, JSON.stringify({ favorites: ['x'], settings: { muted: true }, gone: 1 }));
+    const again = new Store(file, DEFAULTS, nodeStorage);
+    assert.deepStrictEqual([again.data.favorites, again.data.settings.muted, again.data.settings.volume, again.data.gone], [['x'], true, 1, undefined]);
+    assert.deepStrictEqual(DEFAULTS.favorites, []); // the defaults themselves are never written to
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('state: only what the window may change is taken from a patch', () => {
+  const data = structuredClone(DEFAULTS);
+  assert.deepStrictEqual(applyPatch(data, null), { changed: false, settings: false });
+  assert.deepStrictEqual(applyPatch(data, { favorites: ['a'], playlists: 'nope', activePlaylistId: 5 }), { changed: true, settings: false });
+  assert.deepStrictEqual([data.favorites, data.playlists, data.activePlaylistId], [['a'], [], '']);
+  assert.strictEqual(applyPatch(data, { settings: { muted: true } }).settings, true);
+  assert.deepStrictEqual([data.settings.muted, data.settings.volume], [true, 1]);
+
+  const now = Date.now();
+  data.status = { fresh: { s: 'ok', t: now - 1000 }, old: { s: 'dead', t: now - 40 * 24 * 3600 * 1000 }, broken: null };
+  pruneStatus(data, now);
+  assert.deepStrictEqual(Object.keys(data.status), ['fresh']);
+});
+
+test('backend without files: playlists, imports and settings on any storage (as on Android)', async () => {
+  const { createBackend } = require('../platform/android/backend.js');
+  const storage = memoryStorage();
+  await withServer((req, res) => {
+    if (req.url === '/lists/sports.m3u') return res.end('#EXTM3U\n#EXTINF:-1 group-title="Sport",One\nhttp://a/1\n');
+    if (req.url === '/latin1.m3u') return res.end(Buffer.from('#EXTM3U\n#EXTINF:-1,Caf\xe9\nhttp://a/2\n', 'latin1'));
+    res.statusCode = 404;
+    res.end();
+  }, async (base) => {
+    const b = await createBackend({ storage, fetchImpl: fetch, dataDir: 'data' });
+    assert.deepStrictEqual(b.store.data, DEFAULTS);
+
+    // From an address: the new playlist is named after the file.
+    const first = await b.imports.importUrl('', base + '/lists/sports.m3u');
+    assert.deepStrictEqual([first.created, first.added, first.playlist.name], [true, 1, 'sports']);
+    assert.match(first.playlist.id, /^[0-9a-f]{12}$/);
+    // Older playlists that are not UTF-8 still read correctly.
+    const second = await b.imports.importUrl(first.playlist.id, base + '/latin1.m3u');
+    assert.deepStrictEqual([second.created, second.added], [false, 1]);
+    assert.deepStrictEqual((await b.library.channels(first.playlist.id)).map((c) => c.name), ['One', 'Café']);
+    // A failed import of a new playlist leaves nothing behind.
+    await assert.rejects(b.imports.importUrl('', base + '/missing.m3u'), /download the playlist/);
+    await assert.rejects(b.imports.importUrl('', 'ftp://a/b'), /http:\/\/ or https:\/\//);
+    assert.strictEqual(b.library.playlists.length, 1);
+
+    // From picked files: one playlist for all of them, and a file that cannot be read is reported.
+    const picked = await b.imports.importTexts('', [
+      { name: 'My list.m3u8', read: async () => '#EXTM3U\n#EXTINF:-1,Three\nhttp://a/3\n' },
+      { name: 'broken.m3u', read: async () => { throw new Error('could not read it'); } },
+      { name: 'again.m3u', read: async () => '#EXTM3U\n#EXTINF:-1,Three\nhttp://a/3\n#EXTINF:-1,Four\nhttp://a/4\n' },
+    ]);
+    assert.deepStrictEqual([picked.created, picked.playlist.name, picked.added, picked.skipped, picked.errors], [true, 'My list', 2, 1, ['could not read it']]);
+    assert.strictEqual(await b.imports.importTexts('', []), null);
+
+    b.patchState({ favorites: ['http://a/1'], activePlaylistId: first.playlist.id });
+    b.store.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepStrictEqual([...storage.files.keys()].sort(), [`data/playlists/${first.playlist.id}.json`, `data/playlists/${picked.playlist.id}.json`, 'data/settings.json'].sort());
+
+    // After a restart everything is still there.
+    const again = await createBackend({ storage, fetchImpl: fetch, dataDir: 'data' });
+    assert.deepStrictEqual([again.store.data.favorites, again.store.data.activePlaylistId], [['http://a/1'], first.playlist.id]);
+    assert.deepStrictEqual(again.library.playlists.map((p) => [p.name, p.count]), [['sports', 2], ['My list', 2]]);
+    assert.strictEqual((await again.library.channels(picked.playlist.id))[1].name, 'Four');
+  });
+  assert.strictEqual(decodeText(Buffer.from('é', 'utf8')), 'é');
+});
+
+test('platforms: preload.js offers exactly the calls and events of the contract', () => {
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const block = /exposeInMainWorld\('api', \{([\s\S]*?)\n\}\);/.exec(preload)[1];
+  const offered = [...block.matchAll(/^ {2}(\w+): /gm)].map((m) => m[1]);
+  assert.deepStrictEqual(offered.slice().sort(), Object.keys(contract.METHODS).sort());
+  const events = [.../const EVENTS = new Set\(\[([^\]]*)\]\)/.exec(preload)[1].matchAll(/'([^']+)'/g)].map((m) => m[1]);
+  assert.deepStrictEqual(events.sort(), Object.keys(contract.EVENTS).sort());
+  // Every call the window makes is in the contract.
+  const app = fs.readFileSync(path.join(__dirname, '..', 'src', 'app.js'), 'utf8');
+  for (const m of app.matchAll(/\bapi\.(\w+)\(/g)) assert.ok(contract.METHODS[m[1]], `app.js calls api.${m[1]}, which is not in the contract`);
+});
+
+test('android: window.api offers the same calls as on a computer, and starts empty', async () => {
+  const { createApi } = require('../platform/android/api.js');
+  const { createBackend } = require('../platform/android/backend.js');
+  const opened = [];
+  const credits = { app: { url: 'https://github.com/o/r', version: '0' }, sections: [{ items: [{ url: 'https://x.example/lib' }] }] };
+  const make = (tv) => createApi({
+    openBackend: () => createBackend({ storage: memoryStorage(), fetchImpl: fetch }),
+    getDevice: async () => ({ tv, version: '9.9.9' }),
+    probeFetch: fetch,
+    host: { confirm: async () => true, copyText: async () => {}, credits: async () => structuredClone(credits), openExternal: async (u) => { opened.push(u); }, pickFiles: async () => null },
+  });
+  const { api, emit } = make(false);
+  const preload = fs.readFileSync(path.join(__dirname, '..', 'preload.js'), 'utf8');
+  const onDesktop = [.../exposeInMainWorld\('api', \{([\s\S]*?)\n\}\);/.exec(preload)[1].matchAll(/^ {2}(\w+): /gm)].map((m) => m[1]);
+  assert.deepStrictEqual(Object.keys(api).sort(), onDesktop.sort());
+  assert.deepStrictEqual(Object.keys(api).sort(), Object.keys(contract.METHODS).sort());
+
+  await assert.rejects(api.createPlaylist('Too early'), /not started/);
+  const init = await api.init();
+  assert.deepStrictEqual([init.platform, init.version, init.files, init.accent], ['android', '9.9.9', [], '']);
+  assert.deepStrictEqual(init.state, DEFAULTS);
+  assert.strictEqual((await make(true).api.init()).platform, 'androidtv');
+
+  // What the window is handed is a copy, as it is across Electron's process boundary.
+  init.state.favorites.push('changed in the window');
+  const p = await api.createPlaylist('Mine');
+  p.name = 'changed in the window';
+  assert.strictEqual((await api.renamePlaylist(p.id, '')).name, 'Mine');
+  assert.deepStrictEqual(await api.playlistChannels(p.id), []);
+  assert.deepStrictEqual((await api.setHiddenGroups(p.id, ['News'])).hiddenGroups, ['News']);
+  api.patchState({ activePlaylistId: p.id });
+
+  // What Android never needs answers quietly.
+  assert.deepStrictEqual([await api.importFiles('', ['/x.m3u']), await api.importPick('')], [null, null]);
+  await assert.rejects(make(true).api.init().then(() => 0) && (async () => { const t = make(true); await t.api.init(); return t.api.importPick(''); })(), /on a TV/);
+  assert.deepStrictEqual([(await api.updateState()).status, (await api.mediaCaps({})).convert, await api.popupMenu([]), await api.convertInspect('x')], ['off', false, null, []]);
+  assert.strictEqual(await api.confirm({ message: 'Sure?' }), true);
+  assert.strictEqual((await api.credits()).app.version, '9.9.9');
+  await api.openCreditLink('https://x.example/lib');
+  await assert.rejects(api.openCreditLink('https://evil.example/'), /not in the acknowledgements/);
+  assert.deepStrictEqual(opened, ['https://x.example/lib']);
+
+  const got = [];
+  api.on('check:progress', (batch) => got.push(batch));
+  emit('check:progress', [{ url: 'http://a/1', ok: true }]);
+  assert.deepStrictEqual(got, [[{ url: 'http://a/1', ok: true }]]);
+  assert.throws(() => api.on('nope', () => {}), /Unknown event/);
+});
+
+// The VibeHttp plugin, played by Node: the whole answer at once, as base64; a channel check ("sniff")
+// only gets the beginning of what is not a playlist.
+function fakeVibeHttp(seen = []) {
+  return {
+    async request({ url, headers, maxBytes, sniff }) {
+      seen.push({ url, headers, sniff: !!sniff });
+      let res;
+      try {
+        res = await fetch(url, { headers });
+      } catch (e) {
+        throw new Error('ECONNREFUSED');
+      }
+      let body = res.ok ? Buffer.from(await res.arrayBuffer()) : Buffer.alloc(0);
+      if (sniff && !body.toString('latin1', 0, 8).startsWith('#EXT')) body = body.subarray(0, 64 * 1024);
+      const truncated = !!maxBytes && body.length > maxBytes;
+      if (truncated) body = body.subarray(0, maxBytes);
+      return { status: res.status, url: res.url, contentType: res.headers.get('content-type') || '', truncated, body: body.toString('base64') };
+    },
+  };
+}
+
+test('android: storage, imports and channel checks through the native plugins', async () => {
+  const { createApi } = require('../platform/android/api.js');
+  const { createBackend } = require('../platform/android/backend.js');
+  const { nativeStorage } = require('../platform/android/storage-native.js');
+  const { createNativeFetch } = require('../platform/android/native-fetch.js');
+
+  // The VibeFiles plugin, played by a Map.
+  const disk = new Map();
+  const files = {
+    read: async ({ path: p }) => (disk.has(p) ? { data: disk.get(p) } : { missing: true }),
+    write: async ({ path: p, data }) => { disk.set(p, data); },
+    remove: async ({ path: p }) => { disk.delete(p); },
+  };
+  const seen = [];
+  const http = fakeVibeHttp(seen);
+  const ts = tsPackets([[0x1b, 0x100], [0x0f, 0x101]]);
+  const big = '#EXTM3U\n' + Array.from({ length: 20000 }, (_, i) => `#EXTINF:-1 tvg-id="c${i}.us" group-title="Group ${i % 40}",Channel ${i}\nhttp://tv.example/live/${i}.ts`).join('\n');
+
+  await withServer((req, res) => {
+    if (req.url === '/big.m3u') return res.end(big);
+    if (req.url === '/latin1.m3u') return res.end(Buffer.from('#EXTM3U\n#EXTINF:-1,Caf\xe9\nhttp://a/2\n', 'latin1'));
+    if (req.url === '/live.ts') { res.setHeader('Content-Type', 'video/mp2t'); return res.end(Buffer.concat(Array(40).fill(ts))); }
+    if (req.url === '/needs-agent.m3u8') {
+      if (req.headers['user-agent'] !== 'Box/1' || req.headers.referer !== 'http://ref.example/') { res.statusCode = 403; return res.end(); }
+      return res.end('#EXTM3U\n#EXTINF:4,\nseg.ts\n');
+    }
+    if (req.url === '/api/channels.json') return res.end(JSON.stringify([{ id: 'c1.us', categories: ['news'] }]));
+    if (req.url === '/api/logos.json') return res.end(JSON.stringify([{ channel: 'c1.us', feed: null, in_use: true, format: 'PNG', width: 300, url: 'https://x/c1.png' }]));
+    if (req.url === '/api/categories.json') return res.end(JSON.stringify([{ id: 'news', name: 'News' }]));
+    res.statusCode = 404;
+    res.end();
+  }, async (base) => {
+    const make = (tv, picked) => createApi({
+      openBackend: async () => {
+        const b = await createBackend({ storage: nativeStorage(files), fetchImpl: createNativeFetch(http, { maxBytes: 8 * 1024 * 1024 }), dbFetchImpl: fetch, dataDir: 'data' });
+        b.channelDb.api = base + '/api';
+        return b;
+      },
+      getDevice: async () => ({ tv, version: '1.0.0' }),
+      probeFetch: createNativeFetch(http, { sniff: true }),
+      host: { confirm: async () => true, copyText: async () => {}, credits: async () => ({}), openExternal: async () => {}, pickFiles: async () => picked },
+    });
+    const { api, flush } = make(false, [{ name: 'Picked.m3u', read: async () => '#EXTM3U\n#EXTINF:-1,One\nhttp://a/1\n' }]);
+    await api.init();
+
+    // A 20,000-channel playlist by address, a second file that is not UTF-8, and a picked file.
+    const r = await api.importUrl('', base + '/big.m3u');
+    assert.deepStrictEqual([r.created, r.added, r.playlist.name, r.playlist.count], [true, 20000, 'big', 20000]);
+    assert.strictEqual((await api.importUrl(r.playlist.id, base + '/latin1.m3u')).added, 1);
+    const picked = await api.importPick('');
+    assert.deepStrictEqual([picked.created, picked.playlist.name, picked.added], [true, 'Picked', 1]);
+    await assert.rejects(api.importUrl('', base + '/missing.m3u'), /download the playlist.*404/);
+    await assert.rejects(createNativeFetch(http, { maxBytes: 1024 })(base + '/big.m3u'), /too large/);
+    assert.deepStrictEqual(await api.lookupChannels(['c1.us', 'c2.us']), { 'c1.us': { logo: 'https://x/c1.png', groups: ['News'] } });
+
+    // Channel checks: only the start of a stream is read, with the channel's own headers.
+    const p = await api.probe(base + '/live.ts', null);
+    assert.deepStrictEqual([p.ok, p.kind, p.streams.map((x) => x.codec)], [true, 'mpegts', ['h264', 'aac']]);
+    assert.strictEqual((await api.probe(base + '/needs-agent.m3u8', null)).ok, false);
+    assert.strictEqual((await api.probe(base + '/needs-agent.m3u8', { userAgent: 'Box/1', referrer: 'http://ref.example/' })).ok, true);
+    assert.ok(seen.some((x) => x.sniff && x.headers['User-Agent'] === 'Box/1'));
+    const progress = [];
+    api.on('check:progress', (batch) => progress.push(...batch));
+    assert.deepStrictEqual(await api.startCheck([{ url: base + '/live.ts' }, { url: base + '/gone.ts' }]), { cancelled: false });
+    assert.deepStrictEqual(progress.sort((a, b) => a.url.localeCompare(b.url)), [{ url: base + '/gone.ts', ok: false }, { url: base + '/live.ts', ok: true }]);
+
+    // Everything is in the app's files, and still there when the app is opened again.
+    api.patchState({ favorites: [{ url: 'http://a/1' }], activePlaylistId: r.playlist.id });
+    flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepStrictEqual([...disk.keys()].sort(), ['data/cache/channel-db.json', `data/playlists/${picked.playlist.id}.json`, `data/playlists/${r.playlist.id}.json`, 'data/settings.json'].sort());
+    const again = make(false, null).api;
+    const init = await again.init();
+    assert.deepStrictEqual([init.state.playlists.map((x) => x.count), init.state.activePlaylistId, init.state.favorites], [[20001, 1], r.playlist.id, [{ url: 'http://a/1' }]]);
+    const channels = await again.playlistChannels(r.playlist.id);
+    assert.deepStrictEqual([channels.length, channels[19999].name, channels[20000].name], [20001, 'Channel 19999', 'Café']);
+
+    await again.removePlaylist(picked.playlist.id);
+    assert.ok(!disk.has(`data/playlists/${picked.playlist.id}.json`));
+  });
+});
+
+test('android: the stand-in for <video> drives the native player and reports like a video element', async () => {
+  const { installNativePlayer, kindOf } = require('../platform/android/player.js');
+  assert.deepStrictEqual(['http://a/x.m3u8?t=1', 'http://a/x.mpd', 'http://a/live/u/p/1.ts', 'rtsp://a/x', 'http://a/play'].map(kindOf), ['hls', 'dash', '', '', '']);
+
+  // Just enough of a page: elements that take events, attributes and classes.
+  class El extends EventTarget {
+    constructor(id) { super(); this.id = id || ''; this.attrs = {}; this.hidden = false; this.textContent = ''; this.rect = { left: 300, top: 0, width: 500, height: 400 }; const set = new Set(); this.classList = { add: (c) => set.add(c), toggle: (c, on) => (on ? set.add(c) : set.delete(c)), contains: (c) => set.has(c) }; }
+    getAttribute(n) { return n in this.attrs ? this.attrs[n] : null; }
+    setAttribute(n, v) { this.attrs[n] = String(v); }
+    removeAttribute(n) { delete this.attrs[n]; }
+    getBoundingClientRect() { return this.rect; }
+    replaceWith(other) { byId[other.id] = other; }
+    after() {}
+  }
+  const byId = { video: new El('video'), player: new El('player') };
+  const doc = Object.assign(new EventTarget(), {
+    getElementById: (id) => byId[id],
+    createElement: () => new El(),
+    documentElement: new El(),
+    defaultView: { addEventListener() {}, setInterval() {} },
+  });
+  const calls = [];
+  const listeners = {};
+  const plugin = { addListener: (name, fn) => { listeners[name] = fn; } };
+  for (const m of ['play', 'stop', 'pause', 'resume', 'seek', 'setVolume', 'setRect', 'setImmersive']) plugin[m] = async (args) => { calls.push([m, args]); };
+  const sent = (m) => calls.filter((c) => c[0] === m).map((c) => c[1]);
+  let probed = { ok: false, kind: 'webpage', reason: 'webpage' };
+  const player = installNativePlayer({ plugin, document: doc, isTv: () => false, probe: async () => probed });
+  const video = byId.video;
+  assert.ok(video === player.element && doc.documentElement.classList.contains('native-player'));
+
+  const events = [];
+  for (const e of ['play', 'playing', 'waiting', 'pause', 'ended', 'durationchange', 'resize']) video.addEventListener(e, () => events.push(e));
+  const errors = [];
+  const engine = player.start({ url: 'http://tv.example/live/u/p/1.ts', headers: { userAgent: 'Box/1', referrer: 'http://ref.example/' } }, (reason, detail) => errors.push([reason, detail]));
+  const session = sent('play')[0].session;
+  assert.deepStrictEqual(sent('play')[0], { url: 'http://tv.example/live/u/p/1.ts', userAgent: 'Box/1', referrer: 'http://ref.example/', kind: '', session });
+  assert.deepStrictEqual(sent('setRect')[0], { x: 300, y: 0, width: 500, height: 400 });
+  assert.deepStrictEqual([video.paused, video.src, Number.isNaN(video.duration)], [false, 'http://tv.example/live/u/p/1.ts', true]);
+
+  // A live channel: buffering, then playing. Twice-a-second reports are not new "playing" events.
+  listeners.state({ session, state: 'buffering', position: 0, duration: -1, live: true, width: 0, height: 0 });
+  listeners.state({ session, state: 'playing', position: 0.4, duration: -1, live: true, width: 1280, height: 720 });
+  listeners.state({ session, state: 'playing', position: 0.9, duration: -1, live: true, width: 1280, height: 720 });
+  listeners.state({ session: session - 1, state: 'ended', position: 9, duration: 9, live: false, width: 1, height: 1 }); // from a channel that was left
+  assert.deepStrictEqual(events, ['play', 'waiting', 'durationchange', 'waiting', 'resize', 'playing']);
+  assert.deepStrictEqual([video.currentTime, video.duration, video.videoHeight, engine.isLive(), video.paused], [0.9, Infinity, 720, true, false]);
+
+  // Pausing from the page and from outside it (a phone call), volume, and seeking in a film.
+  video.pause();
+  assert.deepStrictEqual([video.paused, sent('pause').length], [true, 1]);
+  await video.play();
+  listeners.state({ session, state: 'paused', position: 5, duration: 60, live: false, width: 1280, height: 720 });
+  assert.deepStrictEqual([video.paused, video.duration, engine.isLive(), sent('resume').length], [true, 60, false, 1]);
+  video.muted = true;
+  video.volume = 0.4;
+  video.currentTime = 30;
+  assert.deepStrictEqual([sent('setVolume').pop(), sent('seek').pop(), video.currentTime], [{ volume: 0.4, muted: true }, { position: 30 }, 30]);
+
+  // Sound the device can't decode is said, not hidden; nothing decodable at all is an error.
+  listeners.tracks({ session, noSound: true, noPicture: false, audio: 'audio/ac3', video: 'video/avc' });
+  assert.strictEqual(video.hasSound, false);
+  listeners.tracks({ session, noSound: true, noPicture: true, audio: 'audio/mpeg-L2', video: 'video/mpeg2' });
+  assert.deepStrictEqual(errors.pop(), ['unsupported', 'MPEG-2 video and MP2 sound']);
+
+  // An address that is not a stream is looked at to say why: a web page here, a dead server next.
+  const again = (cb) => player.start({ url: 'http://tv.example/page' }, cb);
+  again((reason) => errors.push(reason));
+  await listeners.error({ session: sent('play').pop().session, reason: 'unsupported', detail: 'ERROR_CODE_PARSING_MANIFEST_MALFORMED' });
+  probed = { ok: false, reason: 'http', status: 404 };
+  again((reason, detail) => errors.push(reason + ' ' + detail));
+  await listeners.error({ session: sent('play').pop().session, reason: 'unsupported', detail: 'ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED' });
+  again((reason, detail) => errors.push(reason + ' ' + detail));
+  await listeners.error({ session: sent('play').pop().session, reason: 'offline', detail: 'ERROR_CODE_IO_BAD_HTTP_STATUS' });
+  assert.deepStrictEqual(errors, ['webpage', 'offline http', 'offline ERROR_CODE_IO_BAD_HTTP_STATUS']);
+
+  // Letting go of the stream, the way the app does it.
+  video.removeAttribute('src');
+  video.load();
+  assert.deepStrictEqual([sent('stop').length > 0, video.paused, video.videoHeight], [true, true, 0]);
+  await assert.rejects(video.play(), /Nothing to play/);
+
+  // Full screen is done by the app, not the page: the player covers it and the phone turns sideways.
+  let changes = 0;
+  doc.addEventListener('fullscreenchange', () => changes++);
+  await byId.player.requestFullscreen();
+  assert.deepStrictEqual([doc.fullscreenElement === byId.player, sent('setImmersive').pop(), doc.documentElement.classList.contains('native-full')], [true, { on: true, landscape: true }, true]);
+  await doc.exitFullscreen();
+  assert.deepStrictEqual([doc.fullscreenElement, sent('setImmersive').pop().on, changes], [null, false, 2]);
+});
+
+test('android: menus are a sheet in the page, and a tap on the picture shows the controls instead of pausing', async () => {
+  const { createMenu } = require('../platform/android/menu.js');
+  const { installTouch } = require('../platform/android/touch.js');
+  class El extends EventTarget {
+    constructor() { super(); this.children = []; this.attrs = {}; this.textContent = ''; this.className = ''; const set = new Set(); this.classList = { add: (c) => set.add(c), remove: (c) => set.delete(c), contains: (c) => set.has(c) }; }
+    appendChild(c) { this.children.push(c); c.parent = this; return c; }
+    remove() { this.parent.children = this.parent.children.filter((c) => c !== this); }
+    setAttribute(n, v) { this.attrs[n] = v; }
+    click() { this.dispatchEvent(Object.assign(new Event('click'), {})); }
+  }
+  const doc = { createElement: () => new El(), body: new El() };
+  const menu = createMenu(doc);
+  const rows = () => doc.body.children[0].children[0].children;
+
+  const chosen = menu.show([{ id: 'play', label: 'Play' }, { type: 'separator' }, { id: 'hide', label: 'Hide Offline Channels', checked: true }, { id: 'no', label: 'Not now', enabled: false }]);
+  assert.deepStrictEqual(rows().map((r) => r.className), ['sheet-item', 'sheet-sep', 'sheet-item', 'sheet-item']);
+  assert.deepStrictEqual([rows()[2].attrs['aria-checked'], rows()[2].children[0].textContent, rows()[3].disabled, rows()[0].children[1].textContent], ['true', '✓', true, 'Play']);
+  rows()[2].click();
+  assert.deepStrictEqual([await chosen, doc.body.children.length, menu.isOpen()], ['hide', 0, false]);
+
+  // Back, or a tap beside the sheet, closes it without choosing; a second menu replaces the first.
+  const first = menu.show([{ id: 'a', label: 'A' }]);
+  const second = menu.show([{ id: 'b', label: 'B' }]);
+  assert.deepStrictEqual([await first, doc.body.children.length], [null, 1]);
+  assert.strictEqual(menu.close(), true);
+  assert.deepStrictEqual([await second, menu.close()], [null, false]);
+
+  // Touch: the app's own handlers (installed after) never see a finger on the picture.
+  const video = new El();
+  const playerEl = new El();
+  installTouch({ video, playerEl });
+  const seenByApp = [];
+  for (const type of ['pointerdown', 'pointermove', 'pointerup']) video.addEventListener(type, (e) => seenByApp.push(e.pointerType + ' ' + type));
+  let shown = 0;
+  playerEl.addEventListener('mousemove', () => { shown++; playerEl.classList.remove('controls-hidden'); });
+  const point = (type, pointerType, x = 10, y = 10) => video.dispatchEvent(Object.assign(new Event(type), { pointerType, pointerId: 1, clientX: x, clientY: y }));
+  const tap = () => { point('pointerdown', 'touch'); point('pointerup', 'touch'); };
+
+  playerEl.classList.add('idle');
+  tap();
+  assert.strictEqual(shown, 0); // nothing playing: nothing to show
+  playerEl.classList.remove('idle');
+  playerEl.classList.add('controls-hidden');
+  tap();
+  assert.deepStrictEqual([shown, playerEl.classList.contains('controls-hidden')], [1, false]);
+  tap();
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), true); // and a second tap hides them again
+  point('pointerdown', 'touch');
+  point('pointerup', 'touch', 200, 10); // a swipe is not a tap
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), true);
+  playerEl.classList.add('paused');
+  playerEl.classList.remove('controls-hidden');
+  tap();
+  assert.strictEqual(playerEl.classList.contains('controls-hidden'), false); // paused: the controls stay
+  point('pointerdown', 'mouse');
+  point('pointerup', 'mouse');
+  assert.deepStrictEqual(seenByApp, ['mouse pointerdown', 'mouse pointerup']); // a mouse works as on a computer
+});
+
+test('android: a starting playlist is imported once, on the first start', async () => {
+  const { createApi } = require('../platform/android/api.js');
+  const { createBackend } = require('../platform/android/backend.js');
+  const storage = memoryStorage();
+  let serving = true;
+  await withServer((req, res) => {
+    if (!serving) { res.statusCode = 503; return res.end(); }
+    res.end('#EXTM3U\n#EXTINF:-1 group-title="Albania",One\nhttp://a/1\n#EXTINF:-1 group-title="Italy",Two\nhttp://a/2\n');
+  }, async (base) => {
+    const open = () => createApi({
+      openBackend: () => createBackend({ storage, fetchImpl: fetch, dataDir: 'data' }),
+      getDevice: async () => ({ tv: true, version: '1.0.0' }),
+      probeFetch: fetch,
+      defaultPlaylist: { name: 'Free TV', url: base + '/playlist.m3u8' },
+      host: { confirm: async () => true, copyText: async () => {}, credits: async () => ({}), openExternal: async () => {}, pickFiles: async () => null },
+    });
+    let app = open();
+    assert.strictEqual(app.pendingDefault(), null); // not before the app has started
+    await app.api.init();
+    const token = app.pendingDefault();
+    assert.ok(token);
+
+    // No connection on the first start: nothing is left behind, and the next start tries again.
+    serving = false;
+    await assert.rejects(app.api.importFiles('', [token]), /download the playlist/);
+    assert.deepStrictEqual([(await app.api.init()).state.playlists, app.pendingDefault()], [[], token]);
+    serving = true;
+    const r = await app.api.importFiles('', [token]);
+    assert.deepStrictEqual([r.created, r.added, r.playlist.name, r.playlist.count], [true, 2, 'Free TV', 2]);
+    assert.strictEqual(app.pendingDefault(), null);
+    app.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+
+    // It is the person's playlist from then on: deleting it does not bring it back.
+    app = open();
+    const init = await app.api.init();
+    assert.deepStrictEqual([init.state.playlists.map((p) => p.name), app.pendingDefault()], [['Free TV'], null]);
+    await app.api.removePlaylist(init.state.playlists[0].id);
+    app.flush();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    app = open();
+    assert.deepStrictEqual([(await app.api.init()).state.playlists, app.pendingDefault()], [[], null]);
+  });
+});
+
+test('android tv: an arrow moves the focus to the nearest thing that way', () => {
+  const { pickNext } = require('../platform/android/tv-focus.js');
+  const box = (left, top, width, height) => ({ left, top, right: left + width, bottom: top + height });
+  //   [playlist ▾]            [⋯]
+  //   [All] [Favorites] [Recent] [Groups ▾]
+  //   [ search                         ]
+  //   [ list ......................... ]
+  const playlist = box(10, 10, 120, 40);
+  const more = box(300, 10, 40, 40);
+  const all = box(10, 60, 50, 32);
+  const favorites = box(66, 60, 110, 32);
+  const recent = box(182, 60, 90, 32);
+  const groups = box(278, 60, 62, 32);
+  const search = box(10, 100, 330, 40);
+  const list = box(0, 150, 350, 380);
+  const others = (from) => [playlist, more, all, favorites, recent, groups, search, list].filter((r) => r !== from);
+  const go = (from, key) => others(from)[pickNext(from, others(from), key)];
+
+  assert.strictEqual(go(list, 'ArrowUp'), search);
+  assert.strictEqual(go(search, 'ArrowDown'), list);
+  assert.strictEqual(go(search, 'ArrowUp'), all); // straight above, not the nearer-looking one off to the side
+  assert.strictEqual(go(all, 'ArrowRight'), favorites);
+  assert.strictEqual(go(favorites, 'ArrowRight'), recent);
+  assert.strictEqual(go(groups, 'ArrowLeft'), recent);
+  assert.strictEqual(go(groups, 'ArrowUp'), more);
+  assert.strictEqual(go(all, 'ArrowUp'), playlist);
+  assert.strictEqual(go(playlist, 'ArrowRight'), more);
+  assert.strictEqual(go(more, 'ArrowDown'), groups);
+  assert.strictEqual(go(all, 'ArrowLeft'), undefined); // nothing that way: the focus stays
+  assert.strictEqual(go(list, 'ArrowDown'), undefined);
+});
+
+test('android: the web app builds, with nothing from Node in it', async () => {
+  const { build } = require('../scripts/build-android-web.js');
+  const out = fs.mkdtempSync(path.join(os.tmpdir(), 'vibe-www-'));
+  try {
+    await build(out);
+    const html = fs.readFileSync(path.join(out, 'index.html'), 'utf8');
+    assert.ok(html.indexOf('platform-android.js') > 0 && html.indexOf('platform-android.js') < html.indexOf('<script src="app.js">'));
+    const bundle = fs.readFileSync(path.join(out, 'platform-android.js'), 'utf8');
+    assert.ok(!/\brequire\(["'](fs|path|crypto|child_process|electron)["']\)/.test(bundle));
+    assert.ok(!/\beval\(|new Function\(/.test(bundle), 'the page forbids eval');
+    assert.ok(html.includes('name="viewport"') && html.indexOf('android.css') > html.indexOf('styles.css'), 'Android styles come after the shared ones');
+    for (const f of ['app.js', 'm3u.js', 'styles.css', 'android.css', 'credits.json', 'vendor/hls.min.js']) assert.ok(fs.existsSync(path.join(out, f)), f);
+    assert.ok(!fs.existsSync(path.join(out, 'recovery.html')));
+  } finally {
+    fs.rmSync(out, { recursive: true, force: true });
+  }
 });
 
 (async () => {

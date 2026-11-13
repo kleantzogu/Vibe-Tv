@@ -11,14 +11,16 @@ const fs = require('fs');
 const path = require('path');
 
 const { Store } = require('./lib/store');
-const { describe, fetchBuffer } = require('./lib/net');
+const storage = require('./lib/storage-node');
+const { DEFAULTS, pruneStatus, applyPatch } = require('./lib/state');
+const { createImports, decodeText } = require('./lib/imports');
+const { describe } = require('./lib/net');
 const { ChannelDb } = require('./lib/channeldb');
 const { probe, checkAll } = require('./lib/probe');
 const { readFileRetry, explainReadError } = require('./lib/readfile');
 const { Library } = require('./lib/library');
 const { Converter } = require('./lib/convert');
 const { Updates } = require('./lib/updates');
-const xtream = require('./lib/xtream');
 const codecs = require('./lib/codecs');
 
 // Optional overrides (used by the automated tests; also handy for a portable setup).
@@ -33,12 +35,12 @@ if (envVar('USER_DATA')) app.setPath('userData', envVar('USER_DATA'));
 app.commandLine.appendSwitch('disable-features', 'UseDnsHttpsSvcb');
 
 const isMac = process.platform === 'darwin';
-const PLAYLIST_EXT = /\.(m3u8?|txt)$/i;
 
 let win = null;
 let store = null;
 let channelDb = null;
 let library = null;
+let imports = null; // imports from addresses and Xtream logins (lib/imports.js)
 let converter = null;
 let updates = null;
 // Where releases live: the GitHub repository in the publish settings, so a fork points at its own.
@@ -86,16 +88,6 @@ const cacheFile = (name) => path.join(cacheDir(), name);
 
 /* ───────────────────────────── settings ───────────────────────────── */
 
-const DEFAULTS = {
-  playlists: [], // { id, name, count, createdAt }; channels are in playlists/<id>.json
-  activePlaylistId: '',
-  favorites: [],
-  recents: [],
-  status: {}, // stream url -> { s: 'ok' | 'dead', t: timestamp }
-  settings: { hideOffline: false, volume: 1, muted: false, sidebar: 'show', autoUpdate: true }, // sidebar: show | auto | hide
-  window: { width: 1280, height: 800 },
-};
-
 // The app used to be called "M3U Player", and its data folder was named after it. The first time
 // Vibe TV starts, playlists, favorites and settings are copied over from that folder (which is left
 // as it was).
@@ -117,39 +109,17 @@ function adoptOldData() {
 
 function openStore() {
   adoptOldData();
-  store = new Store(path.join(app.getPath('userData'), 'settings.json'), DEFAULTS);
-  // Forget check results that are older than a month.
-  const cutoff = Date.now() - 30 * 24 * 3600 * 1000;
-  for (const [url, v] of Object.entries(store.data.status)) {
-    if (!v || !v.t || v.t < cutoff) delete store.data.status[url];
-  }
+  store = new Store(path.join(app.getPath('userData'), 'settings.json'), DEFAULTS, storage);
+  pruneStatus(store.data);
 }
 
 /* ───────────────────────────── playlists ───────────────────────────── */
-
-function decodeText(buf) {
-  try {
-    return new TextDecoder('utf-8', { fatal: true }).decode(buf);
-  } catch (e) {
-    return new TextDecoder('windows-1252').decode(buf); // older playlists are often not UTF-8
-  }
-}
-
-const baseName = (file) => path.basename(file).replace(PLAYLIST_EXT, '') || 'Playlist';
 
 async function readPlaylistFile(file) {
   try {
     return decodeText(await readFileRetry(file, { onWaiting: () => send('import:waiting', path.basename(file)) }));
   } catch (e) {
     throw new Error(explainReadError(e, file).long);
-  }
-}
-
-async function readPlaylistUrl(url) {
-  try {
-    return decodeText(await fetchBuffer(fetchImpl, url, { timeout: 30000 }));
-  } catch (e) {
-    throw new Error(`Couldn’t download the playlist: ${describe(e)}.`);
   }
 }
 
@@ -161,96 +131,15 @@ async function legacyText(p) {
   try {
     text = decodeText(await fs.promises.readFile(copy));
   } catch (e) {
-    text = p.kind === 'url' ? await readPlaylistUrl(p.source) : await readPlaylistFile(p.source);
+    text = p.kind === 'url' ? await imports.readPlaylistUrl(p.source) : await readPlaylistFile(p.source);
   }
   return text;
 }
 
 // Imports files into a playlist; with no playlist given, a new one is made, named after the first file.
-async function importFiles(playlistId, files) {
+function importFiles(playlistId, files) {
   files = files.filter((f) => typeof f === 'string' && f);
-  if (!files.length) return null;
-  let id = playlistId;
-  let created = null;
-  let added = 0;
-  let skipped = 0;
-  const errors = [];
-  for (const f of files) {
-    try {
-      const text = await readPlaylistFile(path.resolve(f));
-      if (!id) {
-        created = library.create(baseName(f));
-        id = created.id;
-      }
-      const r = await library.importText(id, text, `“${path.basename(f)}”`);
-      added += r.added;
-      skipped += r.skipped;
-    } catch (e) {
-      errors.push(e.message);
-    }
-  }
-  if (!id) throw new Error(errors[0] || 'Nothing was imported');
-  return { playlist: library.find(id), created: !!created, added, skipped, errors };
-}
-
-async function importUrl(playlistId, url) {
-  let parsed;
-  try {
-    parsed = new URL(String(url || '').trim());
-  } catch (e) {
-    throw new Error('That does not look like a web address. It should start with http:// or https://');
-  }
-  if (!/^https?:$/.test(parsed.protocol)) throw new Error('The address must start with http:// or https://');
-  const text = await readPlaylistUrl(parsed.href);
-  let id = playlistId;
-  let created = false;
-  if (!id) {
-    const last = decodeURIComponent(parsed.pathname.split('/').filter(Boolean).pop() || '').replace(PLAYLIST_EXT, '');
-    id = library.create(last && !/^(index|playlist|get|tv)$/i.test(last) ? last : parsed.hostname).id;
-    created = true;
-  }
-  try {
-    const r = await library.importText(id, text, 'This address');
-    return { ...r, created, errors: [] };
-  } catch (e) {
-    if (created) await library.remove(id);
-    throw e;
-  }
-}
-
-// Xtream Codes: log in with server / username / password. The login is kept with the playlist so
-// it can be refreshed from the server later. Logging in again with the same account refreshes the
-// playlist that already has it instead of making a second one.
-async function xtreamLogin(form) {
-  form = form && typeof form === 'object' ? form : {};
-  const movies = !!form.movies;
-  const r = await xtream.loadAccount(fetchImpl, form, { movies });
-  const same = (p) => p.xtream && p.xtream.server === r.login.server && p.xtream.username === r.login.username;
-  const existing = library.playlists.find(same);
-  const source = { xtream: { ...r.login, movies } };
-  if (existing) {
-    library.setSource(existing.id, source);
-    const res = await library.replaceChannels(existing.id, r.channels);
-    return { ...res, created: false, skipped: 0, errors: [], account: r.account, live: r.live, movies: r.movies };
-  }
-  const name = String(form.name || '').trim() || new URL(r.login.server).hostname;
-  const created = library.create(name);
-  try {
-    library.setSource(created.id, source);
-    const res = await library.addChannels(created.id, r.channels);
-    return { ...res, created: true, errors: [], account: r.account, live: r.live, movies: r.movies };
-  } catch (e) {
-    await library.remove(created.id);
-    throw e;
-  }
-}
-
-async function xtreamRefresh(id) {
-  const p = library.find(id);
-  if (!p.xtream) throw new Error('This playlist was not loaded from an Xtream Codes login');
-  const r = await xtream.loadAccount(fetchImpl, p.xtream, { movies: !!p.xtream.movies });
-  const res = await library.replaceChannels(id, r.channels);
-  return { ...res, account: r.account };
+  return imports.importTexts(playlistId, files.map((f) => ({ name: path.basename(f), read: () => readPlaylistFile(path.resolve(f)) })));
 }
 
 /* ───────────────────────────── stream requests ───────────────────────────── */
@@ -543,14 +432,10 @@ function registerIpc() {
   });
 
   ipcMain.on('state:patch', (_e, patch) => {
-    if (!patch || typeof patch !== 'object') return;
     const d = store.data;
-    if (Array.isArray(patch.favorites)) d.favorites = patch.favorites;
-    if (Array.isArray(patch.recents)) d.recents = patch.recents;
-    if (patch.status && typeof patch.status === 'object') d.status = patch.status;
-    if (typeof patch.activePlaylistId === 'string') d.activePlaylistId = patch.activePlaylistId;
-    if (patch.settings && typeof patch.settings === 'object') {
-      d.settings = { ...d.settings, ...patch.settings };
+    const applied = applyPatch(d, patch);
+    if (!applied.changed) return;
+    if (applied.settings) {
       const menu = Menu.getApplicationMenu();
       const item = menu && menu.getMenuItemById('hide-offline');
       if (item) item.checked = !!d.settings.hideOffline;
@@ -614,9 +499,9 @@ function registerIpc() {
     return res.canceled ? null : importFiles(playlistId || '', res.filePaths);
   });
   handle('import:files', (playlistId, files) => importFiles(playlistId || '', Array.isArray(files) ? files : []));
-  handle('import:url', (playlistId, url) => importUrl(playlistId || '', url));
-  handle('xtream:login', (form) => xtreamLogin(form));
-  handle('xtream:refresh', (id) => xtreamRefresh(id));
+  handle('import:url', (playlistId, url) => imports.importUrl(playlistId || '', url));
+  handle('xtream:login', (form) => imports.xtreamLogin(form));
+  handle('xtream:refresh', (id) => imports.xtreamRefresh(id));
 
   handle('db:lookup', (ids) => channelDb.lookup(Array.isArray(ids) ? ids.slice(0, 200000) : []));
 
@@ -776,8 +661,9 @@ if (!app.requestSingleInstanceLock()) {
     // When run from source (npm start) macOS would show Electron's icon in the Dock.
     if (isMac && !app.isPackaged && app.dock) app.dock.setIcon(path.join(__dirname, 'build', 'icon-mac.png'));
     converter = new Converter();
-    library = new Library(store, path.join(app.getPath('userData'), 'playlists'), legacyText);
-    channelDb = new ChannelDb({ fetchImpl, cacheDir: cacheDir(), api: envVar('DB_URL') || undefined });
+    library = new Library(store, path.join(app.getPath('userData'), 'playlists'), legacyText, storage);
+    imports = createImports({ library, fetchImpl });
+    channelDb = new ChannelDb({ fetchImpl, cacheDir: cacheDir(), api: envVar('DB_URL') || undefined, storage });
     pendingOpen.push(...playlistArgs(process.argv.slice(app.isPackaged ? 1 : 2)));
     registerIpc();
     installStreamHooks();

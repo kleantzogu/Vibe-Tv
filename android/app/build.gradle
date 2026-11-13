@@ -1,0 +1,103 @@
+apply plugin: 'com.android.application'
+apply plugin: 'org.jetbrains.kotlin.android'
+
+// One version number for every platform: the one in package.json (1.2.3 -> versionCode 10203).
+def appVersion = new groovy.json.JsonSlurper().parseText(file('../../package.json').text).version
+def (vMajor, vMinor, vPatch) = appVersion.tokenize('.-').take(3).collect { it.toInteger() }
+
+// The release key. It is never in the repository: its place and passwords come from the environment
+// (VIBE_TV_KEYSTORE_FILE, VIBE_TV_KEYSTORE_PASSWORD, VIBE_TV_KEY_ALIAS, VIBE_TV_KEY_PASSWORD; that is
+// how the Release workflow passes them) or, on your own computer, from android/keystore.properties
+// (KEYSTORE_FILE=..., KEYSTORE_PASSWORD=..., KEY_ALIAS=..., KEY_PASSWORD=...), which Git ignores.
+// Without them `assembleRelease` still builds, but the APK is unsigned and can't be installed.
+def keystoreProps = new Properties()
+def keystorePropsFile = rootProject.file('keystore.properties')
+if (keystorePropsFile.exists()) keystorePropsFile.withInputStream { keystoreProps.load(it) }
+def signing = { String name -> System.getenv('VIBE_TV_' + name) ?: keystoreProps.getProperty(name) }
+def hasReleaseKey = signing('KEYSTORE_FILE') as boolean
+
+android {
+    namespace = "com.vibetv.app"
+    compileSdk = rootProject.ext.compileSdkVersion
+    defaultConfig {
+        applicationId "com.vibetv.app"
+        minSdkVersion rootProject.ext.minSdkVersion
+        targetSdkVersion rootProject.ext.targetSdkVersion
+        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionName appVersion
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        aaptOptions {
+             // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
+             // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
+            ignoreAssetsPattern = '!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~'
+        }
+    }
+    signingConfigs {
+        release {
+            if (hasReleaseKey) {
+                storeFile rootProject.file(signing('KEYSTORE_FILE'))
+                storePassword signing('KEYSTORE_PASSWORD')
+                keyAlias signing('KEY_ALIAS')
+                keyPassword signing('KEY_PASSWORD')
+            }
+        }
+    }
+    buildTypes {
+        release {
+            // R8 removes the code the app never reaches (most of the player library's formats stay).
+            minifyEnabled true
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+            if (hasReleaseKey) signingConfig signingConfigs.release
+            // For checking a release build before it goes out: `./gradlew assembleRelease -PinspectableRelease`
+            // builds the same shrunk code, but lets test/android/playback-check.js look inside it.
+            debuggable project.hasProperty('inspectableRelease')
+        }
+    }
+    // The release APK is named like the desktop installers: Vibe-TV-1.2.3-android.apk
+    applicationVariants.all { variant ->
+        if (variant.buildType.name == 'release') {
+            variant.outputs.all { outputFileName = "Vibe-TV-${appVersion}-android.apk" }
+        }
+    }
+}
+
+repositories {
+    flatDir{
+        dirs '../capacitor-cordova-android-plugins/src/main/libs', 'libs'
+    }
+}
+
+dependencies {
+    implementation fileTree(include: ['*.jar'], dir: 'libs')
+    implementation "androidx.appcompat:appcompat:$androidxAppCompatVersion"
+    implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
+    implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
+    implementation project(':capacitor-android')
+    // The player (VibePlayerPlugin): Media3 ExoPlayer with HLS, DASH and RTSP, and the view it draws in.
+    implementation "androidx.media3:media3-exoplayer:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-hls:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-dash:$media3Version"
+    implementation "androidx.media3:media3-exoplayer-rtsp:$media3Version"
+    implementation "androidx.media3:media3-ui:$media3Version"
+    testImplementation "junit:junit:$junitVersion"
+    androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
+    androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"
+    implementation project(':capacitor-cordova-android-plugins')
+}
+
+apply from: 'capacitor.build.gradle'
+
+kotlin {
+    compilerOptions {
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21 // same as Capacitor's Java level
+    }
+}
+
+try {
+    def servicesJSON = file('google-services.json')
+    if (servicesJSON.text) {
+        apply plugin: 'com.google.gms.google-services'
+    }
+} catch(Exception e) {
+    logger.info("google-services.json not found, google-services plugin not applied. Push Notifications won't work")
+}
