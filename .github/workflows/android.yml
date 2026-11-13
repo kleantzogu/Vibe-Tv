@@ -27,7 +27,7 @@ jobs:
         with:
           distribution: temurin
           java-version: 21 # what Capacitor 8 builds with
-      - uses: gradle/actions/setup-gradle@v4
+      - uses: gradle/actions/setup-gradle@48b5f213c81028ace310571dc5ec0fbbca0b2947 # v4
       - run: npm ci
       - run: npm test
       - run: npm run build:android-web
