@@ -31,16 +31,18 @@
     return { attrs, rawName };
   }
 
-  // Pulls "(1080p)" and "[Geo-blocked]" style markers out of a channel name.
+  // Pulls "(1080p)" and "[Geo-blocked]" style markers out of a channel name. The patterns don't start
+  // with \s*: on a name with a long run of spaces that makes every replace take quadratic time (the
+  // parser runs in the desktop app's main process). The spaces left behind are collapsed below.
   function splitName(rawName) {
     let quality = '';
     const tags = [];
     let name = rawName
-      .replace(/\s*\((\d{3,4})p\)/gi, (_, q) => {
+      .replace(/\((\d{3,4})p\)/gi, (_, q) => {
         if (!quality) quality = q + 'p';
         return '';
       })
-      .replace(/\s*\[([^\]]{1,40})\]/g, (_, t) => {
+      .replace(/\[([^\]]{1,40})\]/g, (_, t) => {
         tags.push(t.trim());
         return '';
       })
@@ -61,6 +63,10 @@
       return url;
     }
   }
+
+  // A line break (or another control character) in a header value would let a playlist add request
+  // headers of its own: ffmpeg writes the value into its request as it is.
+  const isHeaderValue = (v) => !/[\0-\x08\n-\x1f\x7f]/.test(v);
 
   // Kodi style: http://host/stream.m3u8|User-Agent=Foo&Referer=http://bar
   function splitKodiHeaders(url, headers) {
@@ -128,6 +134,7 @@
       if (attrs['http-user-agent'] || attrs['user-agent']) {
         headers.userAgent = headers.userAgent || attrs['http-user-agent'] || attrs['user-agent'];
       }
+      for (const k of ['referrer', 'userAgent']) if (headers[k] && !isHeaderValue(headers[k])) delete headers[k];
 
       const rawName = (pending && pending.rawName) || attrs['tvg-name'] || nameFromUrl(url);
       const { name, quality, tags } = splitName(rawName);

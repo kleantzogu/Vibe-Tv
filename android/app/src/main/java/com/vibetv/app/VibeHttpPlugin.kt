@@ -36,7 +36,7 @@ class VibeHttpPlugin : Plugin() {
         val address = call.getString("url") ?: return call.reject("No address")
         val headers = call.getObject("headers") ?: JSObject()
         val timeout = (call.getInt("timeout") ?: 30000).coerceIn(1000, 600000)
-        val maxBytes = (call.getInt("maxBytes") ?: 64 * 1024 * 1024).coerceAtLeast(1024)
+        val maxBytes = (call.getInt("maxBytes") ?: 64 * 1024 * 1024).coerceIn(1024, 128 * 1024 * 1024) // never more than the page ever needs
         val sniff = call.getBoolean("sniff") ?: false
 
         pool.execute {

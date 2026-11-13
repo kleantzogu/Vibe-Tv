@@ -91,6 +91,10 @@ class VibePlayerPlugin : Plugin() {
     @PluginMethod
     fun play(call: PluginCall) {
         val url = call.getString("url") ?: return call.reject("No address")
+        // Network streams only: a playlist must not point the player at file://, content:// or
+        // asset:// and so at files on the device.
+        val scheme = android.net.Uri.parse(url).scheme?.lowercase()
+        if (scheme !in setOf("http", "https", "rtsp", "udp")) return call.reject("This kind of stream address isn't supported", "protocol-other")
         val req = Request(url, call.getString("userAgent"), call.getString("referrer"), call.getString("kind") ?: "", call.getInt("session") ?: 0)
         ui.post {
             try {

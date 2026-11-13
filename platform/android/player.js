@@ -80,7 +80,7 @@ function installNativePlayer({ plugin, document, isTv = () => false, probe = nul
     fire('waiting');
     place();
     Promise.resolve(plugin.play({ url: channel.url, userAgent: h.userAgent || '', referrer: h.referrer || '', kind: kindOf(channel.url), session }))
-      .catch((e) => fail('offline', e && e.message));
+      .catch((e) => fail(e && e.code === 'protocol-other' ? 'protocol-other' : 'offline', e && e.message));
     sendVolume();
   }
 

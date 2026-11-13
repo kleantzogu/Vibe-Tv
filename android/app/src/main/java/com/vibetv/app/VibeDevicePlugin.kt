@@ -39,14 +39,15 @@ class VibeDevicePlugin : Plugin() {
     private fun takeFile(intent: android.content.Intent?) {
         if (intent?.action != android.content.Intent.ACTION_VIEW) return
         val uri = intent.data ?: return
+        // Only addresses another app hands over: file:// or this app's own provider would let an
+        // outside intent make the app read (and pass to the page) its own private files.
+        if (uri.scheme != "content" || uri.authority?.startsWith(context.packageName) != false) return
         intent.data = null // not again when the screen is rebuilt
         Thread {
             try {
                 var name = uri.lastPathSegment?.substringAfterLast('/') ?: "Playlist"
-                if (uri.scheme == "content") {
-                    context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                        if (c.moveToFirst() && !c.isNull(0)) name = c.getString(0)
-                    }
+                context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
+                    if (c.moveToFirst() && !c.isNull(0)) name = c.getString(0)
                 }
                 val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
                     val out = java.io.ByteArrayOutputStream()
