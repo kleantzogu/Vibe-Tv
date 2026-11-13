@@ -42,12 +42,7 @@ const menu = createMenu(document);
 const opened = new Map(); // token -> { name, data (base64) }
 const bytesOf = (b64) => Uint8Array.from(atob(b64), (c) => c.charCodeAt(0));
 
-// The playlist the app starts with on Android (phone and TV), so there is something to watch right
-// away: free-to-air and free online channels from around the world, kept by the Free-TV project.
-const DEFAULT_PLAYLIST = { name: 'Free TV', url: 'https://raw.githubusercontent.com/Free-TV/IPTV/master/playlist.m3u8' };
-
-const { api, flush, emit, whenStarted, pendingDefault } = createApi({
-  defaultPlaylist: DEFAULT_PLAYLIST,
+const { api, flush, emit, whenStarted } = createApi({
   openBackend: () =>
     createBackend({
       storage: nativeStorage(VibeFiles),
@@ -94,11 +89,8 @@ const tvFocus = installTvFocus({ document, isTv: () => tv, player: nativePlayer,
 
 VibeDevice.addListener('key', (e) => tvFocus.remoteKey(e.key)); // on a phone too: headset and keyboard play keys
 
-// First start: bring in the starting playlist, the way an opened file is imported (with the same
-// messages). On a TV the focus then starts on the channels.
+// On a TV the focus starts on the channels, or on the first screen's buttons when there is no playlist yet.
 whenStarted.then(() => {
-  const first = pendingDefault();
-  if (first) emit('files:opened', [first]);
   setTimeout(() => tvFocus.start(), 300);
 });
 

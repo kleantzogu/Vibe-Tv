@@ -833,49 +833,21 @@ test('android: menus are a sheet in the page, and a tap on the picture shows the
   assert.deepStrictEqual(seenByApp, ['mouse pointerdown', 'mouse pointerup']); // a mouse works as on a computer
 });
 
-test('android: a starting playlist is imported once, on the first start', async () => {
+test('android: the app starts empty, with no playlist of its own', async () => {
   const { createApi } = require('../platform/android/api.js');
   const { createBackend } = require('../platform/android/backend.js');
-  const storage = memoryStorage();
-  let serving = true;
-  await withServer((req, res) => {
-    if (!serving) { res.statusCode = 503; return res.end(); }
-    res.end('#EXTM3U\n#EXTINF:-1 group-title="Albania",One\nhttp://a/1\n#EXTINF:-1 group-title="Italy",Two\nhttp://a/2\n');
-  }, async (base) => {
-    const open = () => createApi({
-      openBackend: () => createBackend({ storage, fetchImpl: fetch, dataDir: 'data' }),
-      getDevice: async () => ({ tv: true, version: '1.0.0' }),
-      probeFetch: fetch,
-      defaultPlaylist: { name: 'Free TV', url: base + '/playlist.m3u8' },
-      host: { confirm: async () => true, copyText: async () => {}, credits: async () => ({}), openExternal: async () => {}, pickFiles: async () => null },
-    });
-    let app = open();
-    assert.strictEqual(app.pendingDefault(), null); // not before the app has started
-    await app.api.init();
-    const token = app.pendingDefault();
-    assert.ok(token);
-
-    // No connection on the first start: nothing is left behind, and the next start tries again.
-    serving = false;
-    await assert.rejects(app.api.importFiles('', [token]), /download the playlist/);
-    assert.deepStrictEqual([(await app.api.init()).state.playlists, app.pendingDefault()], [[], token]);
-    serving = true;
-    const r = await app.api.importFiles('', [token]);
-    assert.deepStrictEqual([r.created, r.added, r.playlist.name, r.playlist.count], [true, 2, 'Free TV', 2]);
-    assert.strictEqual(app.pendingDefault(), null);
-    app.flush();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-
-    // It is the person's playlist from then on: deleting it does not bring it back.
-    app = open();
-    const init = await app.api.init();
-    assert.deepStrictEqual([init.state.playlists.map((p) => p.name), app.pendingDefault()], [['Free TV'], null]);
-    await app.api.removePlaylist(init.state.playlists[0].id);
-    app.flush();
-    await new Promise((resolve) => setTimeout(resolve, 10));
-    app = open();
-    assert.deepStrictEqual([(await app.api.init()).state.playlists, app.pendingDefault()], [[], null]);
+  const requests = [];
+  const app = createApi({
+    openBackend: () => createBackend({ storage: memoryStorage(), fetchImpl: async (url) => { requests.push(String(url)); throw new Error('offline'); }, dataDir: 'data' }),
+    getDevice: async () => ({ tv: true, version: '1.0.0' }),
+    probeFetch: fetch,
+    host: { confirm: async () => true, copyText: async () => {}, credits: async () => ({}), openExternal: async () => {}, pickFiles: async () => null },
   });
+  const init = await app.api.init();
+  await app.whenStarted;
+  assert.deepStrictEqual([init.state.playlists, init.files], [[], []]);
+  assert.strictEqual(await app.api.importFiles('', ['default-playlist']), null); // nothing answers to the old token
+  assert.deepStrictEqual(requests, []); // and nothing was downloaded
 });
 
 test('android tv: an arrow moves the focus to the nearest thing that way', () => {
