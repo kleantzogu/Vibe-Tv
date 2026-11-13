@@ -29,6 +29,27 @@
 - **Channel checks.** Find out which channels are offline, and hide them.
 - **Logos and categories** from the playlist, or from the public iptv-org database.
 - Custom `Referer` / `User-Agent` per channel (`#EXTVLCOPT`, Kodi-style `|User-Agent=`).
+- **On your phone and your TV too.** The same app for Android: a touch layout on a phone or tablet,
+  and a layout worked entirely with the remote on Android TV, Google TV and Fire TV.
+
+## Platforms
+
+One codebase and one version number for all of them; the interface is the same everywhere, sized for
+what you hold or point at it.
+
+| | Desktop | Android phone / tablet | Android TV |
+| --- | --- | --- | --- |
+| Runs on | macOS (Apple Silicon), Windows, Linux | Android 7 or newer | Android TV, Google TV, Fire TV |
+| Worked with | Mouse and keyboard | Touch | Remote |
+| Player | Chromium with hls.js, dash.js, mpegts.js | Android's Media3 | Android's Media3 |
+| Formats the player can't decode | Converted with the bundled ffmpeg | Need a decoder on the device | Need a decoder on the device |
+| Import a playlist file | Yes | Yes, also "Open with Vibe TV" | No: from a URL or an Xtream login |
+| First start | Empty | The Free TV playlist | The Free TV playlist |
+| Updates | By itself | Install the newer APK | Install the newer APK |
+| Picture in picture | Yes | No | No |
+
+The rest of this page describes the desktop app unless it says otherwise; [Android](#android) covers
+what is different there.
 
 ## Open source
 
@@ -78,6 +99,8 @@ Run the checks with:
 npm test
 ```
 
+To build the Android app from source, see [Building it yourself](#android) under Android.
+
 ## Build the installers
 
 ```bash
@@ -99,7 +122,10 @@ signed, so macOS Gatekeeper and Windows SmartScreen show a warning the first tim
 
 Installed copies check GitHub Releases when they start and every six hours. To ship a new version:
 
-1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`), commit and push.
+1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`) in a pull request and merge
+   it: `main` only takes pull requests whose tests pass. Then `git checkout main && git pull`. The one
+   number is the version of every app; the Android version code is worked out from it
+   (`1.2.3` → `10203`).
 2. On a Mac, run `npm run release`. It checks that the tests pass and that everything is pushed,
    builds the signed macOS app, and runs the **launch check**: the packaged app must start, and must
    recover from a simulated broken start. Only then does it tag the commit `v1.2.0` and publish the
@@ -127,7 +153,10 @@ described in the [electron-builder documentation](https://www.electron.build/cod
 ## Android
 
 One app for phones and for TVs: the same APK shows a touch layout on a phone and a remote-control
-layout on a TV. It is not in an app store; you install the file yourself.
+layout on a TV. It needs Android 7 or newer, and is not in an app store; you install the file yourself.
+
+The only permission it asks for is internet access. Playlists, favorites and logins stay in the app's
+own storage on the device and are left out of Android's cloud backups.
 
 **Installing**
 
@@ -173,10 +202,19 @@ You need Node.js 22, a JDK 21 and the Android SDK.
 npm install
 npm run build:android-web && npx cap sync android
 cd android && ./gradlew assembleDebug     # android/app/build/outputs/apk/debug/app-debug.apk
+adb install -r app/build/outputs/apk/debug/app-debug.apk   # onto a connected phone, TV or emulator
 ```
 
+The interface is the desktop's: `npm run build:android-web` copies `src/` into `www/` and adds the
+Android parts from `platform/android/`. So after changing anything in `src/`, `lib/` or
+`platform/android/`, run that line again before building. `www/` is generated; don't edit it.
+`npx cap open android` opens the project in Android Studio.
+
 `test/android/` has test streams and a playback check for an emulator or a connected device, and
-[ANDROID-PLAN.md](ANDROID-PLAN.md) explains how the Android app is put together.
+`test/android/webview.js` runs JavaScript inside the running app, which is handy for trying things by
+hand. [ANDROID-PLAN.md](ANDROID-PLAN.md) explains how the Android app is put together, and
+[AGENTS.md](AGENTS.md) and [DESIGN.md](DESIGN.md) have the rules for changing the interface so it keeps
+working on a computer, a phone and a TV.
 
 **Signing the Android app**
 
@@ -200,6 +238,9 @@ keytool -genkeypair -v -keystore vibe-tv-release.jks -alias vibe-tv -keyalg RSA 
   desktop release goes ahead as before.
 
 ## Using Vibe TV
+
+This describes the desktop app. On Android the same things are there, reached by touch or with the
+remote: see [Remote and touch](#remote-and-touch-android).
 
 **Playlists.** Playlists are lists you make in the app. Import a `.m3u` / `.m3u8` file into one
 (File ▸ Import M3U File, the ⋯ menu at the top of the sidebar, or drop the file on the window), or import from a web
@@ -289,6 +330,40 @@ to play is marked offline as well, and one that plays is marked online.
 | Ctrl/⌘ + Shift + K | Check which channels are online |
 | Ctrl/⌘ + Shift + H | Hide offline channels |
 
+## Remote and touch (Android)
+
+**On a TV**, with the remote:
+
+| Where | Key | Action |
+| --- | --- | --- |
+| Channel list | Up / Down | Move through the channels |
+| | OK | Play; on the channel that is playing, go full screen |
+| | Right | Full screen |
+| | Hold OK | The channel's menu (add to favorites, hide its group…) |
+| | Up from the first channel | To the search field, filters and buttons above the list |
+| Full screen | Up / Down | Previous / next channel |
+| | OK or Right | Show the controls |
+| | Left | Back to the channel list |
+| Controls | Left / Right | Move along the buttons (the favorite star is among them) |
+| | OK | Press the button |
+| | Up / Down | In a film, to the seek bar; otherwise change channel |
+| | Back | Put the controls away |
+| Text field | OK | Type, in the TV's own keyboard |
+| Anywhere | Back | Close whatever is open |
+| | Menu | The ⋯ menu |
+| | Play / Pause, Channel up / down | As their buttons do, on remotes that have them |
+
+**On a phone or tablet:**
+
+| Gesture | Action |
+| --- | --- |
+| Tap a channel | Play |
+| Tap the picture | Show / hide the controls |
+| Double tap the picture | Full screen |
+| Long-press a channel | Its menu |
+| Back | Close whatever is open |
+| Turn the phone | Upright: picture on top, channels below. Sideways: channels beside the picture |
+
 ## What plays
 
 Playback uses Chromium's media engine with hls.js, dash.js and mpegts.js on top, and
@@ -312,6 +387,8 @@ Playback uses Chromium's media engine with hls.js, dash.js and mpegts.js on top,
   streams. Films played through ffmpeg can't be seeked yet.
 - Custom `Referer` and `User-Agent` from `#EXTVLCOPT` lines (and Kodi-style `|User-Agent=…`
   suffixes) are sent with every request for that channel, including through ffmpeg.
+- **On Android** there is no ffmpeg: playback goes through Android's Media3 player and the device's
+  own decoders, so what plays depends on the device. See [Known limitations](#android).
 
 ## Where your data is kept
 
@@ -321,8 +398,11 @@ playlist's channels in `playlists/<id>.json` next to it:
 - Windows: `%APPDATA%\Vibe TV`
 - macOS: `~/Library/Application Support/Vibe TV`
 - Linux: `~/.config/Vibe TV`
+- Android: the app's private storage, which other apps can't read
 
-Delete that folder to start fresh.
+Delete that folder to start fresh; on Android, clear the app's storage in the system settings
+(Apps ▸ Vibe TV ▸ Storage). Uninstalling the Android app removes its data, and Android does not back
+it up, because the files hold Xtream Codes logins. Nothing is synced between devices.
 
 The app used to be called M3U Player. The first time Vibe TV starts, it copies the playlists, favorites
 and settings from the old `M3U Player` folder; that folder is left as it was and can be deleted afterwards.
@@ -336,7 +416,20 @@ of failing silently. It looks for a newer version on GitHub straight away, whate
 setting, downloads it and restarts into it. If no fix is out yet, it offers **Try again**, **Report the
 problem** (a pre-filled GitHub issue, with your home folder and stream addresses left out) and
 **Download from GitHub**, and it keeps looking while it's open. A version that failed to open twice in
-a row goes straight to the recovery window.
+a row goes straight to the recovery window. This is the desktop app only; the Android app has no
+recovery window.
+
+### Android: "App not installed" when updating
+
+Android only installs an APK over a copy signed with the same key. A build you made yourself (or a
+fork's) is signed with a different key than the one from Releases, so one can't replace the other:
+uninstall the installed copy first. That removes its playlists and favorites.
+
+### Android: a channel has picture but no sound, or does not play
+
+The sound is probably AC-3, E-AC-3, MP2 or DTS, or the picture MPEG-2, and the device has no decoder
+for it (the app says so when it knows). TV boxes usually have these; many phones do not. The desktop
+app plays these channels. See [Known limitations](#android).
 
 ### "The file did not arrive in time"
 
@@ -374,18 +467,35 @@ scripts/start.js   `npm start`
 scripts/release.js `npm run release`
 scripts/launch-check.js  Starts a packaged build normally and with a simulated broken start
 scripts/credits.js `npm run credits`: writes src/credits.json, the Acknowledgements list
-.github/           CI and Release workflows, issue and pull request templates
+scripts/build-android-web.js  `npm run build:android-web`: makes www/, the window as the Android app wraps it
+.github/           Workflows (CI: the tests; Release: installers and the APK; Android: a debug APK),
+                   issue and pull request templates
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)
-platform/          What differs per platform: api-contract.js (what the window may ask for), android/ (how Android answers)
-android/           The Android project (Capacitor): manifest, icons, and the app's own plugins in Kotlin
-test/android/      Test streams and a playback check for the Android app
+platform/
+  api-contract.js  Every call the window may make; desktop and Android must both answer all of them
+  android/         How Android answers them (api.js, backend.js, storage-native.js, native-fetch.js),
+                   and what only Android has: player.js (the native player), touch.js and menu.js
+                   (phone), tv-focus.js (remote), android.css (the phone and TV layouts)
+android/           The Android project (Capacitor): manifest, icons, and the app's own plugins in
+                   Kotlin (player, files, network, device)
+test/android/      Test streams, a playback check, and a way to run JavaScript inside the Android app
+AGENTS.md          Rules for changing the code, for AI agents and people: what is shared, what is per platform
+DESIGN.md          Rules for the interface on desktop, phone and TV
+ANDROID-PLAN.md    How the Android app was planned and put together
 ```
+
+The window in `src/` is the same on every platform. It reaches files, the network and the player only
+through `window.api`: on a computer `preload.js` and `main.js` answer, on Android `platform/android/`
+does. `npm test` checks that both offer exactly the calls in `platform/api-contract.js`.
 
 ## Contributing
 
 Bug reports, ideas and pull requests are welcome; [CONTRIBUTING.md](CONTRIBUTING.md) explains how to
-build, test and send changes. Every push and pull request is tested on macOS, Windows and Linux. You can
+build, test and send changes. Every push and pull request is tested on macOS, Windows and Linux, and
+`main` only takes pull requests whose tests pass. A change to the interface reaches the desktop, phone
+and TV apps at once, so read [AGENTS.md](AGENTS.md) and [DESIGN.md](DESIGN.md) first; they are written
+for AI coding agents as much as for people. You can
 also publish your own build from a fork: set `owner` and `repo` under `build.publish` in
 `package.json`, and your users get updates from your releases.
 
