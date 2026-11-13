@@ -426,6 +426,17 @@ test('updates: release notes, errors, and running from source', async () => {
   assert.deepStrictEqual([u.state.status, (await u.check(true)).status], ['off', 'off']);
 });
 
+test('release: each merge gets the next version, or the one a pull request asked for', () => {
+  const { nextVersion } = require('../scripts/next-version.js');
+  const tags = ['v1.0.1', 'v1.2.2', 'v1.2.10', 'v1.10.0-beta', 'nightly'];
+  assert.strictEqual(nextVersion(tags, '1.2.2'), '1.2.11'); // numbers compare as numbers, odd tags are ignored
+  assert.strictEqual(nextVersion(tags, '1.3.0'), '1.3.0'); // raised in package.json
+  assert.strictEqual(nextVersion(['v1.3.0', ...tags], '1.3.0'), '1.3.1'); // and counted on from there
+  assert.strictEqual(nextVersion([], '1.2.2'), '1.2.2');
+  assert.strictEqual(nextVersion(tags, '1.2.2', ['v1.2.10']), '1.2.10'); // a run again keeps its number
+  assert.throws(() => nextVersion(tags, '1.2'), /not like 1\.2\.3/);
+});
+
 test('credits: the acknowledgements list matches what ships', () => {
   const { spawnSync } = require('child_process');
   const r = spawnSync(process.execPath, [path.join(__dirname, '..', 'scripts', 'credits.js'), '--check'], { encoding: 'utf8' });

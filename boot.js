@@ -32,7 +32,7 @@ let recovering = false;
 let recoveryWin = null;
 let failure = '';
 
-/* ───────── launch checks (npm run release, Release workflow) ───────── */
+/* ───────── launch checks (Release workflow) ───────── */
 
 function smoke(ok, message) {
   if (!SMOKE) return;

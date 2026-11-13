@@ -1,56 +1,78 @@
-# Builds the Windows and Linux installers for a release, checks that each starts (and can recover
-# from a broken start), and only then adds them to the release, together with the files installed
-# copies read to update themselves (latest.yml, latest-linux.yml). The macOS installer is built,
-# checked and signed on a Mac with `npm run release`, which pushes the version tag that starts this.
+# Every merge to main that changes the app is a release: installed copies update themselves to it.
 #
-# The work is split in two: the build jobs (desktop and Android) run `npm ci`, and with it the
-# install scripts of every dependency, so they only get a read-only token and keep their results as
-# run artifacts. A separate `publish` job, which never checks out or runs the project's code, is the
-# only one allowed to write: it takes those artifacts and adds them to the release.
+#  1. `version` picks the number: one more than the newest release (scripts/next-version.js), or
+#     "version" in package.json when a pull request raised it (1.3.0, 2.0.0).
+#  2. The build jobs make the macOS, Windows and Linux installers and the Android APK with that number.
+#     Each desktop installer must start, and must recover from a simulated broken start, before anyone
+#     gets it (scripts/launch-check.js).
+#  3. `publish` adds them all to a new release with the files installed copies read to update
+#     (latest-mac.yml, latest.yml, latest-linux.yml). All of them or nothing: a release without one
+#     system's update file would break updates on that system until the next one.
 #
-# Run it by hand (Actions ▸ Release ▸ Run workflow) to build an existing tag; leave "publish" off to
-# only build and download the installers from the run's artifacts.
+# The build jobs run `npm ci`, and with it the install scripts of every dependency, so they only get a
+# read-only token and keep their results as run artifacts. `publish`, which never checks out or runs
+# the project's code, is the only job allowed to write.
+#
+# Run it by hand (Actions ▸ Release ▸ Run workflow) to release main without a merge, for example after
+# a change that skipped the release below; leave "publish" off to only build and download the
+# installers from the run's artifacts (works on any branch).
 name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
+    # Changes that don't touch the app don't make a release of their own: they go out with the next.
+    paths-ignore:
+      - '**.md'
+      - 'LICENSE'
+      - '.github/**'
+      - 'test/**'
   workflow_dispatch:
     inputs:
-      tag:
-        description: Tag to build, for example v1.1.0
-        required: true
-      ref:
-        description: Commit or branch to build instead of the tag (only for fixes outside the app)
-        required: false
-        default: ''
       publish:
-        description: Add the installers to that GitHub release
+        description: Publish the release (only from main)
         type: boolean
         default: false
-      only:
-        description: Build for
-        type: choice
-        options: [windows and linux, windows, linux]
-        default: windows and linux
 
 permissions:
   contents: read
 
+# One release at a time, so each takes the number after the one before.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+env:
+  PUBLISH: ${{ github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish) }}
+
 jobs:
-  build:
-    name: Build (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: ${{ fromJSON(inputs.only == 'windows' && '["windows-latest"]' || inputs.only == 'linux' && '["ubuntu-latest"]' || '["windows-latest", "ubuntu-latest"]') }}
-    runs-on: ${{ matrix.os }}
-    env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+  version:
+    name: Version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.next.outputs.version }}
+      tag: ${{ steps.next.outputs.tag }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref || inputs.tag || github.ref }}
+          fetch-depth: 0 # the tags say which version came last
+          persist-credentials: false
+      - id: next
+        run: node scripts/next-version.js | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build (${{ matrix.os }})
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
           persist-credentials: false
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
@@ -58,59 +80,83 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
+      - name: Set the version
+        shell: bash
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
 
+      # A Mac only installs an update signed with the same Developer ID as the app it has, so a release
+      # needs the certificate (see README, "Signing the macOS app"). A build-only run can do without.
+      - name: Build (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        env:
+          CSC_LINK: ${{ secrets.MAC_CERTS_P12_BASE64 }}
+          CSC_KEY_PASSWORD: ${{ secrets.MAC_CERTS_PASSWORD }}
+        run: |
+          if [ -z "$CSC_LINK" ]; then
+            if [ "$PUBLISH" = true ]; then
+              echo "::error::No Developer ID certificate (secret MAC_CERTS_P12_BASE64): Macs would refuse the update, so nothing is released."
+              exit 1
+            fi
+            echo "::warning::No Developer ID certificate: this macOS build is not signed."
+            unset CSC_LINK CSC_KEY_PASSWORD
+            export CSC_IDENTITY_AUTO_DISCOVERY=false
+          fi
+          npx electron-builder --publish never
       - name: Build
+        if: runner.os != 'macOS'
         run: npx electron-builder --publish never
 
-      # The packaged app must start, and must recover from a simulated broken start, before anyone
-      # gets it (scripts/launch-check.js). Linux has no screen here, so it runs in a virtual one.
+      - name: Launch check (macOS)
+        if: runner.os == 'macOS'
+        run: node scripts/launch-check.js "dist/mac-arm64/Vibe TV.app/Contents/MacOS/Vibe TV"
       - name: Launch check (Windows)
         if: runner.os == 'Windows'
         run: node scripts/launch-check.js "dist/win-unpacked/Vibe TV.exe"
+      # Linux has no screen here, so it runs in a virtual one.
       - name: Launch check (Linux)
         if: runner.os == 'Linux'
         run: xvfb-run -a node scripts/launch-check.js dist/linux-unpacked/vibe-tv
 
-      # Everything `publish` adds to the release comes from here. Windows and Linux write different
-      # update files (latest.yml, latest-linux.yml), so nothing clashes when the artifacts are merged.
+      # Everything `publish` adds to the release comes from here. Each system writes its own update
+      # file (latest-mac.yml, latest.yml, latest-linux.yml), so nothing clashes when they are merged.
       - name: Keep the installers with this run
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vibe-tv-${{ env.TAG }}-${{ runner.os }}
+          name: vibe-tv-${{ env.VERSION }}-${{ runner.os }}
           path: |
+            dist/*.dmg
+            dist/*-mac.zip
             dist/*.exe
-            dist/*.exe.blockmap
             dist/*.AppImage
+            dist/*.blockmap
             dist/latest*.yml
           if-no-files-found: error
           retention-days: 14
 
-  # The Android app (phone + Android TV): one signed APK, added to the same release as the desktop
-  # installers. It never makes a release of its own, and never touches latest*.yml: installed desktop
-  # copies read those from the latest release to update themselves.
+  # The Android app (phone + Android TV): one signed APK in the same release as the desktop
+  # installers. It has no update check of its own, and never touches latest*.yml.
   # The signing key comes from repository secrets (see README, "Signing the Android app"). Until they
   # are set, this job says so and adds nothing, and the desktop release is not affected.
   android:
     name: Build (Android)
-    if: github.event_name == 'push' || inputs.only == 'windows and linux'
+    needs: version
     runs-on: ubuntu-latest
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      VERSION: ${{ needs.version.outputs.version }}
       ELECTRON_SKIP_BINARY_DOWNLOAD: 1 # nothing here starts Electron
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
-          ref: ${{ inputs.ref || inputs.tag || github.ref }}
           persist-credentials: false
 
-      - name: Is there an Android app and a key to sign it with?
+      - name: Is there a key to sign the app with?
         id: can
         shell: bash
         env:
           KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          if [ ! -d android ]; then echo "This version has no Android app."; echo "build=false" >> "$GITHUB_OUTPUT"
-          elif [ -z "$KEYSTORE_BASE64" ]; then echo "::warning::No Android signing key (secret ANDROID_KEYSTORE_BASE64): the APK is not built."; echo "build=false" >> "$GITHUB_OUTPUT"
+          if [ -z "$KEYSTORE_BASE64" ]; then echo "::warning::No Android signing key (secret ANDROID_KEYSTORE_BASE64): the APK is not built."; echo "build=false" >> "$GITHUB_OUTPUT"
           else echo "build=true" >> "$GITHUB_OUTPUT"; fi
 
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -133,6 +179,7 @@ jobs:
         run: |
           npm ci
           npm test
+          npm version "$VERSION" --no-git-tag-version --allow-same-version
           npm run build:android-web
           npx cap sync android
 
@@ -157,22 +204,22 @@ jobs:
         if: steps.can.outputs.build == 'true'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vibe-tv-${{ env.TAG }}-Android
+          name: vibe-tv-${{ env.VERSION }}-Android
           path: android/app/build/outputs/apk/release/Vibe-TV-*-android.apk
           if-no-files-found: error
           retention-days: 14
 
-  # The only job with write access. It runs after the builds whatever their outcome (`!cancelled()`),
-  # so a failed system or a skipped Android build doesn't hold back what did build.
+  # The only job with write access. It runs only when every build passed.
   publish:
-    name: Publish
-    needs: [build, android]
-    if: ${{ !cancelled() && (github.event_name == 'push' || inputs.publish) }}
+    name: Publish ${{ needs.version.outputs.tag }}
+    needs: [version, build, android]
+    if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || inputs.publish)
     runs-on: ubuntu-latest
     permissions:
       contents: write
     env:
-      TAG: ${{ inputs.tag || github.ref_name }}
+      TAG: ${{ needs.version.outputs.tag }}
+      VERSION: ${{ needs.version.outputs.version }}
       GH_REPO: ${{ github.repository }} # gh works without a checkout when it knows the repository
     steps:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
@@ -181,15 +228,18 @@ jobs:
           merge-multiple: true
           path: out
 
-      - name: Add the files to the release
+      - name: Release
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           shopt -s nullglob
+          for f in latest-mac.yml latest.yml latest-linux.yml; do
+            [ -f "out/$f" ] || { echo "::error::$f is missing, so nothing is released."; exit 1; }
+          done
           files=(out/*)
-          [ ${#files[@]} -gt 0 ] || { echo "::error::Nothing to publish: no build kept any files."; exit 1; }
+          # A draft first: installed copies only see the release once every file is in it.
           gh release view "$TAG" >/dev/null 2>&1 ||
-            gh release create "$TAG" --verify-tag --title "Vibe TV ${TAG#v}" --notes "Vibe TV ${TAG#v}" ||
-            gh release view "$TAG" >/dev/null
+            gh release create "$TAG" --draft --target "$GITHUB_SHA" --title "Vibe TV $VERSION" --generate-notes
           gh release upload "$TAG" --clobber "${files[@]}"
+          gh release edit "$TAG" --draft=false

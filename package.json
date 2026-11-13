@@ -31,7 +31,6 @@
     "start": "node scripts/start.js",
     "test": "node test/run.js",
     "dist": "electron-builder",
-    "release": "node scripts/release.js",
     "credits": "node scripts/credits.js",
     "build:android-web": "node scripts/build-android-web.js"
   },

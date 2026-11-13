@@ -71,5 +71,7 @@ Desktop needs Node.js 20 or newer; Android needs Node.js 22, JDK 21 and the Andr
 
 ## Pull requests
 
-One change per pull request, branched from `main`. Describe what it does and how it was checked. One
-version number in `package.json` covers all three apps; releases build them from the same tag.
+One change per pull request, branched from `main`. Describe what it does and how it was checked. Every
+merge to `main` that changes the app is released to everyone, all three apps with one version number,
+so only merge what is ready to ship. The version counts on by itself; raise it in `package.json` only
+for a new minor or major version.
