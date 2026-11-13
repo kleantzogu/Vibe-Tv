@@ -5,8 +5,8 @@
  * Starts a packaged build twice, each time with an empty data folder, and fails unless:
  *  1. it starts normally (the window comes up and the app reports in), and
  *  2. with a simulated broken start, the recovery window comes up and can look for a fix.
- * npm run release and the Release workflow run this before anything is published, so a release
- * that can't start, or that couldn't fix itself if it failed to, never reaches anyone.
+ * The Release workflow runs this before anything is published, so a release that can't start, or
+ * that couldn't fix itself if it failed to, never reaches anyone.
  */
 const { spawn } = require('child_process');
 const fs = require('fs');

@@ -119,22 +119,32 @@ signed, so macOS Gatekeeper and Windows SmartScreen show a warning the first tim
 
 ### Publish a release (and update everyone)
 
-Installed copies check GitHub Releases when they start and every six hours. To ship a new version:
+Installed copies check GitHub Releases when they start and every six hours. **Every merge to `main`
+that changes the app is a release**: the **Release** workflow on GitHub Actions
 
-1. Raise `"version"` in `package.json` (for example `1.1.0` → `1.2.0`) in a pull request and merge
-   it: `main` only takes pull requests whose tests pass. Then `git checkout main && git pull`. The one
-   number is the version of every app; the Android version code is worked out from it
-   (`1.2.3` → `10203`).
-2. On a Mac, run `npm run release`. It checks that the tests pass and that everything is pushed,
-   builds the signed macOS app, and runs the **launch check**: the packaged app must start, and must
-   recover from a simulated broken start. Only then does it tag the commit `v1.2.0` and publish the
-   installer with the files the updater reads (`latest-mac.yml`, and the `.zip` macOS updates from).
-   It uses your `gh` login (or `GH_TOKEN`).
-3. The tag starts the **Release** workflow on GitHub Actions, which builds the Windows and Linux
-   installers, runs the same launch check on each, and only then adds them (with `latest.yml` /
-   `latest-linux.yml`) to the same release. It also builds the signed Android APK and adds it there
-   (see [Signing the Android app](#android)).
-4. Edit the release on GitHub to add notes; the app shows them under "What's new".
+1. picks the version: one more than the newest release (`1.2.3` → `1.2.4`). To start a new minor or
+   major version, raise `"version"` in `package.json` in the pull request (`1.3.0`); the next release
+   takes it, and later ones count on from there. The one number is the version of every app; the
+   Android version code is worked out from it (`1.2.4` → `1002004`);
+2. builds the macOS, Windows and Linux installers and the signed Android APK with it, and runs the
+   **launch check** on each installer: the packaged app must start, and must recover from a simulated
+   broken start;
+3. only when everything built and passed, publishes release `v1.2.4` with all of them and the files
+   the updater reads (`latest-mac.yml`, `latest.yml`, `latest-linux.yml`). Its notes list the pull
+   requests merged since the last release; the app shows them under "What's new". Edit them on
+   GitHub if you like.
+
+Merges that only change documentation (`*.md`), tests or the workflows don't make a release of their
+own; they go out with the next. To release `main` right away, run the workflow by hand (Actions ▸
+Release ▸ Run workflow, with **Publish** on). With **Publish** off, it only builds the installers and
+keeps them with the run, on any branch.
+
+**Signing the macOS app.** A Mac only installs an update signed with the same Developer ID as the
+installed app, so the workflow needs the certificate. In Keychain Access, export *Developer ID
+Application: …* (certificate and private key) as a `.p12` file with a password, then add two
+repository secrets (Settings ▸ Secrets and variables ▸ Actions): `MAC_CERTS_P12_BASE64` (the output of
+`base64 -i certificate.p12`) and `MAC_CERTS_PASSWORD`. Delete the `.p12` file afterwards. Without the
+secrets nothing is released, because Macs would refuse the update.
 
 People then get the update as chosen in the app menu (Help menu on Windows and Linux) with
 **Install Updates Automatically**: on (the default), it downloads quietly and installs when they quit,
@@ -459,11 +469,11 @@ lib/
 src/               The window: index.html, styles.css, app.js, m3u.js (playlist parser)
 src/vendor/        hls.js 1.7.3, mpegts.js 1.8.2, dash.js 5.2.1, with their licenses
 scripts/start.js   `npm start`
-scripts/release.js `npm run release`
+scripts/next-version.js  The version a release from main gets
 scripts/launch-check.js  Starts a packaged build normally and with a simulated broken start
 scripts/credits.js `npm run credits`: writes src/credits.json, the Acknowledgements list
 scripts/build-android-web.js  `npm run build:android-web`: makes www/, the window as the Android app wraps it
-.github/           Workflows (CI: the tests; Release: installers and the APK; Android: a debug APK),
+.github/           Workflows (CI: the tests; Release: a release for every merge to main; Android: a debug APK),
                    issue and pull request templates
 test/run.js        `npm test`
 build/             App icons (icon-source.png is the original; make-icons.py rebuilds the others)

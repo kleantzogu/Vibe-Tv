@@ -1,9 +1,12 @@
 apply plugin: 'com.android.application'
 apply plugin: 'org.jetbrains.kotlin.android'
 
-// One version number for every platform: the one in package.json (1.2.3 -> versionCode 10203).
+// One version number for every platform: the one in package.json (1.2.3 -> versionCode 1002003).
+// Minor and patch get three digits each: every merge to main is a release, so the patch number can
+// pass 99. (The old two-digit codes, like 10202 for 1.2.2, are all lower, so updates still install.)
 def appVersion = new groovy.json.JsonSlurper().parseText(file('../../package.json').text).version
 def (vMajor, vMinor, vPatch) = appVersion.tokenize('.-').take(3).collect { it.toInteger() }
+if (vMinor > 999 || vPatch > 999) throw new GradleException("Version ${appVersion}: minor and patch must stay under 1000 for the Android version code")
 
 // The release key. It is never in the repository: its place and passwords come from the environment
 // (VIBE_TV_KEYSTORE_FILE, VIBE_TV_KEYSTORE_PASSWORD, VIBE_TV_KEY_ALIAS, VIBE_TV_KEY_PASSWORD; that is
@@ -23,7 +26,7 @@ android {
         applicationId "com.vibetv.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode vMajor * 10000 + vMinor * 100 + vPatch
+        versionCode vMajor * 1000000 + vMinor * 1000 + vPatch
         versionName appVersion
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         aaptOptions {

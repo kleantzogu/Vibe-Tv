@@ -50,11 +50,10 @@ mistake anywhere else can't break the way out. To see the recovery window, run
 
 ## Releasing (maintainers)
 
-Raise `"version"` in `package.json` in a pull request and merge it (`main` only takes pull requests
-whose tests pass), pull `main`, then run `npm run release` on a Mac. It tags the
-commit, publishes the macOS installer and update files, and the **Release** workflow builds and adds
-the Windows and Linux installers. Installed copies then update themselves. See
-[Publish a release](README.md#publish-a-release-and-update-everyone).
+Every merge to `main` that changes the app is released by the **Release** workflow: it builds and
+checks every installer and the APK, publishes them, and installed copies update themselves. The
+version counts on by itself; raise `"version"` in `package.json` in a pull request only to start a new
+minor or major version. See [Publish a release](README.md#publish-a-release-and-update-everyone).
 
 ## Your own build
 
