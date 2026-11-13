@@ -44,7 +44,6 @@ what you hold or point at it.
 | Player | Chromium with hls.js, dash.js, mpegts.js | Android's Media3 | Android's Media3 |
 | Formats the player can't decode | Converted with the bundled ffmpeg | Need a decoder on the device | Need a decoder on the device |
 | Import a playlist file | Yes | Yes, also "Open with Vibe TV" | No: from a URL or an Xtream login |
-| First start | Empty | The Free TV playlist | The Free TV playlist |
 | Updates | By itself | Install the newer APK | Install the newer APK |
 | Picture in picture | Yes | No | No |
 
@@ -170,10 +169,6 @@ own storage on the device and are left out of Android's cloud backups.
 
 **What is different from the desktop app**
 
-- **It starts with a playlist.** The first time it runs, the app downloads the
-  [Free-TV](https://github.com/Free-TV/IPTV) playlist (free-to-air and free online channels from around
-  the world) as "Free TV", so there is something to watch at once. It is an ordinary playlist: rename it,
-  add to it or delete it. The desktop app starts empty.
 - **On a phone:** the picture is on top and the channels below; turned sideways, the list is beside
   the picture. A tap on the picture shows or hides the controls, a double tap goes full screen, a
   long-press on a channel opens its menu, and Back closes whatever is open. `.m3u` files can be opened
@@ -510,6 +505,5 @@ It includes [hls.js](https://github.com/video-dev/hls.js) (Apache 2.0),
 [ffmpeg-static](https://github.com/eugeneware/ffmpeg-static), which is licensed under the GPL and runs
 as a separate program; its license is installed next to it.
 
-Vibe TV is a player only: no channels are included in it. The Android app downloads the public
-[Free-TV](https://github.com/Free-TV/IPTV) playlist the first time it starts; that list is kept by its own
-project, and you can delete it. Use the app with playlists you have the right to watch.
+Vibe TV is a player only: no channels or playlists are included in it, on any platform, and it
+downloads none by itself. Use the app with playlists you have the right to watch.

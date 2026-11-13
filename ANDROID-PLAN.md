@@ -355,7 +355,7 @@ Checked on the Pixel 7 emulator: upright and sideways layout, playing by tap, co
 - [x] Launcher banner and `LEANBACK_LAUNCHER` entry (done in Phase 2).
 - [ ] Stretch, "send a playlist from your phone" (QR code or a local page): not done.
 
-**A starting playlist (phone and TV).** The first time the app runs with no playlists it imports the [Free-TV](https://github.com/Free-TV/IPTV) playlist (`playlist.m3u8`, about 2,200 free-to-air and free online channels by country) as "Free TV", so there is something to watch at once. It is fetched from GitHub, not bundled; if there is no connection it is tried again on the next start; once imported it is an ordinary playlist, and deleting it does not bring it back. The desktop app still starts empty. The README's "it doesn't come with any channels" needs rewording for Android in Phase 8.
+**A starting playlist (phone and TV): removed.** The app first shipped importing the [Free-TV](https://github.com/Free-TV/IPTV) playlist as "Free TV" on its first start. That was taken out: like the desktop app, the Android app now starts empty and downloads no playlist by itself. A "Free TV" playlist imported by an earlier version stays where it is, as an ordinary playlist.
 
 Checked on the Android TV emulator with remote keys only (`adb shell input keyevent`): first start with the playlist import, moving through channels, playing, full screen, changing channel, the controls, Back, search with the text prompt, filters, the ⋯ menu, the Xtream dialog, and the Menu / channel / play keys; all 14 test streams still play. Not checked on a real TV with a real remote.
 
@@ -373,7 +373,7 @@ Checked on the Android TV emulator with remote keys only (`adb shell input keyev
 
 - [x] Release build: signing from the environment or `android/keystore.properties` (never in the repo), R8 code shrinking (9.5 MB debug → 2.8 MB release), version from `package.json`, APK named `Vibe-TV-<version>-android.apk`.
 - [x] `release.yml`: an Android job that builds and signs the APK and adds it to the **same** release as the desktop installers. It never creates a release of its own and never touches `latest*.yml`. Without the signing secrets it skips the APK and the desktop release is unaffected.
-- [x] README (install, what differs, known limitations, signing), `SECURITY.md`, and the in-app Acknowledgements (Capacitor, Media3, the Free-TV playlist).
+- [x] README (install, what differs, known limitations, signing), `SECURITY.md`, and the in-app Acknowledgements (Capacitor, Media3).
 - [x] A release APK signed with a throwaway key was installed and played the test streams on both emulators.
 - [x] First test on a real phone (Huawei P20, Android 10): 16 channels played, no crashes or player errors in the log.
 - [ ] **The real signing key.** Someone has to create it, back it up, and add the four repository secrets (needs admin rights on the repository). See README, "Signing the Android app".

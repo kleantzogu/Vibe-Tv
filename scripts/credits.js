@@ -202,14 +202,6 @@ function build() {
             purpose: 'Logos and categories for channels that only carry a tvg-id, from the public iptv-org database',
             text: '',
           },
-          {
-            name: 'Free-TV',
-            version: '',
-            license: 'See their repository',
-            url: 'https://github.com/Free-TV/IPTV',
-            purpose: 'The playlist of free channels the Android app starts with. It is downloaded from their repository, not included in the app.',
-            text: '',
-          },
         ],
       },
       {

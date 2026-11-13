@@ -22,7 +22,6 @@ and credit in the release notes if you want it.
   update check, which reads this repository's latest release on GitHub.
 - The Android app keeps the same data in its private app folder, which other apps can't read, and it is
   left out of Android's cloud backup because it holds Xtream logins. It makes the same requests as the
-  desktop app, plus one download of the Free-TV playlist from GitHub the first time it starts. It has
-  no update check: a new version is installed by hand. Release APKs are signed with the project's key;
+  desktop app, except that it has no update check: a new version is installed by hand. Release APKs are signed with the project's key;
   install them from this repository's Releases only.
 - Only the latest release gets security fixes.
