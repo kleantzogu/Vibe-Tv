@@ -18,7 +18,7 @@ const xtream = require('../lib/xtream.js');
 const codecs = require('../lib/codecs.js');
 const { Updates, notesText, friendlyError } = require('../lib/updates.js');
 const startup = require('../lib/startup.js');
-const { inputArgs, cleanError, parseStreams } = require('../lib/convert.js');
+const { Converter, inputArgs, cleanError, parseStreams } = require('../lib/convert.js');
 const os = require('os');
 const fs = require('fs');
 const path = require('path');
@@ -58,6 +58,16 @@ test('playlist: search folding', () => {
   assert.strictEqual(M3U.matchKey('CNBC HD'), M3U.matchKey('cnbc'));
 });
 
+test('playlist: header values with line breaks are dropped, long names stay fast', () => {
+  const { channels } = M3U.parse(
+    '#EXTM3U\n#EXTINF:-1,One\n#EXTVLCOPT:http-referrer=http://r/\nhttp://a/1.avi|User-Agent=a%0D%0AX-Evil: 1\n' +
+      `#EXTINF:-1 http-user-agent="ok\u0000",Two${' '.repeat(100000)}x (720p)\nhttp://a/2\n`
+  );
+  assert.deepStrictEqual(channels.map((c) => c.headers), [{ referrer: 'http://r/' }, null]);
+  const started = Date.now();
+  assert.deepStrictEqual([M3U.splitName(`a${' '.repeat(100000)}b (720p) [x]`).name.length, Date.now() - started < 1000], [3, true]);
+});
+
 test('channel database: best logo and categories', () => {
   const index = buildIndex(
     [{ id: 'ABC.us', categories: ['general', 'news'] }],
@@ -74,6 +84,7 @@ test('channel database: best logo and categories', () => {
   assert.strictEqual(r['ABC.us@West'].logo, 'https://x/west.png');
   assert.strictEqual(r['OnlyFeed.us@SD'].logo, 'https://x/feed.svg');
   assert.strictEqual(r['Nope.us'], undefined);
+  assert.deepStrictEqual(Object.keys(lookup(index, ['constructor', 'toString@x', '__proto__'])), []);
 });
 
 const stamp = (t) => new Date(t).toISOString().replace(/[-:T]/g, '').slice(0, 14) + ' +0000';
@@ -263,6 +274,10 @@ test('playlists: import appends, skips duplicates, converts old playlists', asyn
     await lib.remove(p.id);
     assert.ok(!fs.existsSync(path.join(dir, `${p.id}.json`)));
     assert.deepStrictEqual(store.data.playlists.map((x) => x.id), ['old1']);
+    // An id that isn't a playlist never becomes a file to delete.
+    fs.writeFileSync(path.join(dir, 'other.json'), '{}');
+    await lib.remove('other');
+    assert.ok(fs.existsSync(path.join(dir, 'other.json')));
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -375,7 +390,7 @@ test('codecs: reads the MPEG-TS program map and decides what to convert', () => 
   assert.deepStrictEqual(codecs.hlsStreams('#EXT-X-STREAM-INF:BANDWIDTH=1,CODECS="avc1.640028,ec-3"\nv.m3u8').map((x) => x.codec), ['h264', 'eac3']);
 });
 
-test('convert: ffmpeg input options per kind of address', () => {
+test('convert: ffmpeg input options per kind of address', async () => {
   const http = inputArgs('http://h/x', { userAgent: 'UA/1', referrer: 'http://r/' });
   assert.ok(http.includes('-reconnect') && http[http.indexOf('-user_agent') + 1] === 'UA/1' && http[http.indexOf('-referer') + 1] === 'http://r/');
   assert.ok(inputArgs('rtsp://cam/1').includes('-rtsp_transport'));
@@ -392,6 +407,12 @@ test('convert: ffmpeg input options per kind of address', () => {
   ].join('\n'));
   assert.deepStrictEqual(listed.map((x) => `${x.kind}:${x.codec}`), ['video:h264', 'audio:ac3']);
   assert.strictEqual(inputArgs('http://h/x').slice(-2).join(' '), '-i http://h/x');
+  assert.ok(!inputArgs('http://h/x', { userAgent: 'a\r\nX: y', referrer: 'http://r/\n' }).some((a) => /^-(user_agent|referer)$/.test(a)));
+  const conv = new Converter({ ffmpeg: process.execPath });
+  for (const url of ['file:///etc/passwd', 'concat:/a|/b', '/etc/passwd', 'subfile,,start,0,end,0,,:/etc/passwd']) {
+    await assert.rejects(conv.inspect(url), /isn’t supported/);
+    await assert.rejects(conv.open(url, null, {}), /isn’t supported/);
+  }
   assert.strictEqual(cleanError('[http @ 0x1] HTTP error 403 Forbidden'), 'The server refused the stream (403)');
 });
 

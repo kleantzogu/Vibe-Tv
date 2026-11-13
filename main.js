@@ -195,6 +195,15 @@ function installStreamHooks() {
   });
 }
 
+// The window needs no camera, microphone, location, notifications and so on: only full screen for
+// the player. Electron grants every permission unless told otherwise.
+function restrictPermissions() {
+  const ses = session.defaultSession;
+  const allowed = (permission) => permission === 'fullscreen';
+  ses.setPermissionRequestHandler((_wc, permission, callback) => callback(allowed(permission)));
+  ses.setPermissionCheckHandler((_wc, permission) => allowed(permission));
+}
+
 /* ───────────────────────────── window ───────────────────────────── */
 
 function accentColor() {
@@ -667,6 +676,7 @@ if (!app.requestSingleInstanceLock()) {
     pendingOpen.push(...playlistArgs(process.argv.slice(app.isPackaged ? 1 : 2)));
     registerIpc();
     installStreamHooks();
+    restrictPermissions();
     buildMenu();
     createWindow();
 

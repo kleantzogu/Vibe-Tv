@@ -155,7 +155,7 @@ One app for phones and for TVs: the same APK shows a touch layout on a phone and
 layout on a TV. It needs Android 7 or newer, and is not in an app store; you install the file yourself.
 
 The only permission it asks for is internet access. Playlists, favorites and logins stay in the app's
-own storage on the device and are left out of Android's cloud backups.
+own storage on the device and are left out of Android's cloud backups and device-to-device transfers.
 
 **Installing**
 
